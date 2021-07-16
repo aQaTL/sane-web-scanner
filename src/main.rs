@@ -43,26 +43,25 @@ fn main() -> anyhow::Result<()> {
 	if status != sane::SANE_Status_SANE_STATUS_GOOD {
 		bail!("Sane status is not good: {}", status);
 	}
-	debug!("gitara");
 
+	info!("Fetching printers.");
 	let mut device_list: *mut *const sane::SANE_Device = std::ptr::null_mut();
-
 	let status: sane::SANE_Status = unsafe {
 		libsane.sane_get_devices(&mut device_list as *mut *mut *const sane::SANE_Device, 1)
 	};
 	if status != sane::SANE_Status_SANE_STATUS_GOOD {
 		bail!("Failed to get devices {}", status);
 	}
-	let list_len = unsafe {
-		let mut list_len = 0_isize;
-		while !(*device_list.offset(list_len)).is_null() {
-			list_len += 1;
+	let device_count = unsafe {
+		let mut device_count = 0_isize;
+		while !(*device_list.offset(device_count)).is_null() {
+			device_count += 1;
 		}
-		list_len as usize
+		device_count as usize
 	};
-	debug!("Number of devices found: {}", list_len);
+	debug!("Number of devices found: {}.", device_count);
 	let device_list: &[*const sane::SANE_Device] =
-		unsafe { std::slice::from_raw_parts(device_list, list_len) };
+		unsafe { std::slice::from_raw_parts(device_list, device_count) };
 
 	for (idx, device) in device_list.iter().copied().enumerate() {
 		unsafe {
@@ -76,7 +75,6 @@ fn main() -> anyhow::Result<()> {
 			info!("\tType: {}", type_);
 		}
 	}
-	debug!("gitara");
 
 	Ok(())
 }
