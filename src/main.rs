@@ -183,7 +183,7 @@ fn main() -> anyhow::Result<()> {
 					}
 					let string_list_vec = std::slice::from_raw_parts(string_list, list_len)
 						.into_iter()
-						.map(|&str_ptr| CStr::from_ptr(str_ptr))
+						.map(|&str_ptr| CStr::from_ptr(str_ptr).to_string_lossy())
 						.collect::<Vec<_>>();
 					info!("\tPossible values: {:?}", string_list_vec);
 				}
@@ -396,6 +396,33 @@ fn main() -> anyhow::Result<()> {
 		}
 		image.extend_from_slice(&buf);
 	}
+
+	let mut sane_parameters = sane::SANE_Parameters {
+		format: 0,
+		last_frame: 0,
+		bytes_per_line: 0,
+		pixels_per_line: 0,
+		lines: 0,
+		depth: 0,
+	};
+	let status = unsafe {
+		libsane.sane_get_parameters(
+			device_handle.0,
+			&mut sane_parameters as *mut sane::SANE_Parameters,
+		)
+	};
+	if status != sane::SANE_Status_SANE_STATUS_GOOD {
+		bail!("Failed to get scan parameters {}.", status);
+	}
+
+	info!("Print parameters:");
+	info!("\tFormat {}.", sane_parameters.format);
+	info!("\tLast Frame {}.", sane_parameters.format);
+	info!("\tBytes per line {}.", sane_parameters.format);
+	info!("\tPixels per line {}.", sane_parameters.format);
+	info!("\tLines {}.", sane_parameters.format);
+	info!("\tDepth {}.", sane_parameters.format);
+
 	unsafe {
 		libsane.sane_cancel(device_handle.0);
 	}
