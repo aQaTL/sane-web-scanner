@@ -429,7 +429,6 @@ fn main() -> anyhow::Result<()> {
 
 	info!("Scan completed. Saving to file.");
 	std::fs::write("./scanned_document", image.as_slice())?;
-	std::fs::write("./scanned_document2", buf.as_slice())?;
 
 	Ok(())
 }
