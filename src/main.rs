@@ -1,8 +1,12 @@
 use anyhow::bail;
 use log::{debug, info};
 use std::ffi::{c_void, CStr};
+use std::io::Write;
+use std::path::Path;
 
 mod sane {
+	//! API docs: <https://sane-project.gitlab.io/standard/1.06/api.html>
+
 	#![allow(non_upper_case_globals)]
 	#![allow(non_camel_case_types)]
 	#![allow(non_snake_case)]
@@ -133,6 +137,10 @@ fn main() -> anyhow::Result<()> {
 	}
 	println!("Number of available options: {}.", option_count_value);
 
+	let (mut width, mut height) = (0, 0);
+
+	let mut dpi = 0_i32;
+
 	for option_num in 1..option_count_value {
 		let option_descriptor =
 			unsafe { libsane.sane_get_option_descriptor(device_handle.0, option_num) };
@@ -163,10 +171,11 @@ fn main() -> anyhow::Result<()> {
 				sane::SANE_Constraint_Type_SANE_CONSTRAINT_RANGE => {
 					let range = (*option_descriptor).constraint.range;
 					info!(
-						"\tRange: {}-{}. Quant {}.",
+						"\tRange: {}-{}. Quant {}. Steps {}.",
 						(*range).min,
 						(*range).max,
-						(*range).quant
+						(*range).quant,
+						(*range).max / (*range).quant,
 					);
 				}
 				sane::SANE_Constraint_Type_SANE_CONSTRAINT_WORD_LIST => {
@@ -227,6 +236,17 @@ fn main() -> anyhow::Result<()> {
 					);
 				}
 				info!("Additional status: {:b}.", additional_status);
+
+				let status: sane::SANE_Status = libsane.sane_control_option(
+					device_handle.0,
+					option_num,
+					sane::SANE_Action_SANE_ACTION_GET_VALUE,
+					(&mut dpi as *mut i32).cast::<c_void>(),
+					std::ptr::null_mut(),
+				);
+				if status != sane::SANE_Status_SANE_STATUS_GOOD {
+					bail!("Failed to fetch back set dpi setting {}.", status);
+				}
 			} else if name == CStr::from_bytes_with_nul_unchecked(b"tl-x\0") {
 				// 2 3 4 5 1
 				let mut value = 0_i32;
@@ -282,6 +302,12 @@ fn main() -> anyhow::Result<()> {
 					);
 				}
 				info!("br-x: {}", value);
+
+				let range = (*option_descriptor).constraint.range;
+				// TODO(aQaTL): This code assumes we're using millimeters, we could be using pixels.
+				let width_millimeters = (*range).max as f64 / (*range).quant as f64;
+				let width_inches = width_millimeters / 10.0 / 2.54;
+				width = (width_inches * dpi as f64).round() as i32;
 			} else if name == CStr::from_bytes_with_nul_unchecked(b"br-y\0") {
 				let mut value = 0_i32;
 
@@ -300,9 +326,18 @@ fn main() -> anyhow::Result<()> {
 					);
 				}
 				info!("br-y: {}", value);
+
+				let range = (*option_descriptor).constraint.range;
+				// TODO(aQaTL): This code assumes we're using millimeters, we could be using pixels.
+				let height_millimeters = (*range).max as f64 / (*range).quant as f64;
+				let height_inches = height_millimeters / 10.0 / 2.54;
+				height = (height_inches * dpi as f64).round() as i32;
 			}
 		}
 	}
+
+	info!("Width: {}.", width);
+	info!("Height: {}.", height);
 
 	let status = unsafe { libsane.sane_start(device_handle.0) };
 	if status != sane::SANE_Status_SANE_STATUS_GOOD {
@@ -430,6 +465,56 @@ fn main() -> anyhow::Result<()> {
 
 	info!("Scan completed. Saving to file.");
 	std::fs::write("./scanned_document", image.as_slice())?;
+
+	// TODO(aQaTL): Figure out why we're missing 10 pixels (height is being reported as 2550).
+	save_as_bmp(
+		"./scanned_document.bmp".as_ref(),
+		&mut image,
+		(2560 as u32, height as u32),
+	)?;
+
+	Ok(())
+}
+
+fn save_as_bmp(
+	path: &Path,
+	img: &mut [u8],
+	(width, height): (u32, u32),
+) -> Result<(), std::io::Error> {
+	let mut file = std::fs::File::create(path)?;
+
+	let file_header_size: u32 = 2 + 4 + 2 + 2 + 4;
+	let image_header_size: u32 = 4 + 4 + 4 + 2 + 2 + 4 + 4 + 4 + 4 + 4 + 4;
+
+	// file header
+	file.write_all(&[b'B', b'M'])?;
+	let file_size = file_header_size + image_header_size + img.len() as u32;
+	file.write_all(&file_size.to_le_bytes())?;
+	file.write_all(&[0, 0])?;
+	file.write_all(&[0, 0])?;
+	let pixel_data_offset = file_header_size + image_header_size;
+	file.write_all(&pixel_data_offset.to_le_bytes())?;
+
+	// image header
+	file.write_all(&image_header_size.to_le_bytes())?;
+	file.write_all(&width.to_le_bytes())?;
+	file.write_all(&(height as i32 * -1).to_le_bytes())?;
+	file.write_all(&1_u16.to_le_bytes())?;
+	file.write_all(&24_u16.to_le_bytes())?;
+	file.write_all(&0_u32.to_le_bytes())?;
+	file.write_all(&0_u32.to_le_bytes())?;
+	file.write_all(&0_u32.to_le_bytes())?;
+	file.write_all(&0_u32.to_le_bytes())?;
+	file.write_all(&0_u32.to_le_bytes())?;
+	file.write_all(&0_u32.to_le_bytes())?;
+
+	for chunk in img.chunks_exact_mut(3) {
+		let tmp = chunk[0];
+		chunk[0] = chunk[2];
+		chunk[2] = tmp;
+	}
+
+	file.write_all(img)?;
 
 	Ok(())
 }
