@@ -53,11 +53,11 @@ fn main() -> anyhow::Result<()> {
 		bail!("Failed to get devices {}", status);
 	}
 	let device_count = unsafe {
-		let mut device_count = 0_isize;
-		while !(*device_list.offset(device_count)).is_null() {
+		let mut device_count = 0_usize;
+		while !(*device_list.add(device_count)).is_null() {
 			device_count += 1;
 		}
-		device_count as usize
+		device_count
 	};
 	debug!("Number of devices found: {}.", device_count);
 	let device_list: &[*const sane::SANE_Device] =
@@ -157,15 +157,46 @@ fn main() -> anyhow::Result<()> {
 			info!("\t{:?}", (*option_descriptor).size);
 			info!("\t{:?}", (*option_descriptor).cap);
 			info!("\t{:?}", (*option_descriptor).constraint_type);
+			match (*option_descriptor).constraint_type {
+				sane::SANE_Constraint_Type_SANE_CONSTRAINT_NONE => (),
+				sane::SANE_Constraint_Type_SANE_CONSTRAINT_RANGE => {
+					let range = (*option_descriptor).constraint.range;
+					info!(
+						"\tRange: {}-{}. Quant {}.",
+						(*range).min,
+						(*range).max,
+						(*range).quant
+					);
+				}
+				sane::SANE_Constraint_Type_SANE_CONSTRAINT_WORD_LIST => {
+					let word_list = (*option_descriptor).constraint.word_list;
+					let list_len = *word_list;
+					let word_list_slice =
+						std::slice::from_raw_parts(word_list.add(1), list_len as usize);
+					info!("\tPossible values: {:?}", word_list_slice);
+				}
+				sane::SANE_Constraint_Type_SANE_CONSTRAINT_STRING_LIST => {
+					let string_list = (*option_descriptor).constraint.string_list;
+					let mut list_len = 0;
+					while !(*(string_list.add(list_len))).is_null() {
+						list_len += 1;
+					}
+					let string_list_vec = std::slice::from_raw_parts(string_list, list_len)
+						.into_iter()
+						.map(|&str_ptr| CStr::from_ptr(str_ptr))
+						.collect::<Vec<_>>();
+					info!("\tPossible values: {:?}", string_list_vec);
+				}
+				_ => bail!("Unknown constraint type"),
+			}
 		}
 
 		unsafe {
-			if CStr::from_ptr((*option_descriptor).name)
-				== CStr::from_bytes_with_nul_unchecked(b"resolution\0")
-			{
+			let name = CStr::from_ptr((*option_descriptor).name);
+			if name == CStr::from_bytes_with_nul_unchecked(b"resolution\0") {
 				info!("Setting resolution");
 
-				let mut option_value = match (*option_descriptor).type_ {
+				let mut value = match (*option_descriptor).type_ {
 					sane::SANE_Value_Type_SANE_TYPE_INT | sane::SANE_Value_Type_SANE_TYPE_FIXED => {
 						// 300 DPI
 						300_i32
@@ -184,13 +215,90 @@ fn main() -> anyhow::Result<()> {
 					device_handle.0,
 					option_num,
 					sane::SANE_Action_SANE_ACTION_SET_VALUE,
-					(&mut option_value as *mut i32).cast::<c_void>(),
+					(&mut value as *mut i32).cast::<c_void>(),
 					&mut additional_status as *mut sane::SANE_Int,
 				);
 				if status != sane::SANE_Status_SANE_STATUS_GOOD {
-					bail!("Failed to get control option (option count) {}", status);
+					bail!(
+						"Failed to get control option (no {}) {}",
+						option_num,
+						status
+					);
 				}
 				info!("Additional status: {:b}.", additional_status);
+			} else if name == CStr::from_bytes_with_nul_unchecked(b"tl-x\0") {
+				// 2 3 4 5 1
+				let mut value = 0_i32;
+
+				let status: sane::SANE_Status = libsane.sane_control_option(
+					device_handle.0,
+					option_num,
+					sane::SANE_Action_SANE_ACTION_GET_VALUE,
+					(&mut value as *mut i32).cast::<c_void>(),
+					std::ptr::null_mut(),
+				);
+				if status != sane::SANE_Status_SANE_STATUS_GOOD {
+					bail!(
+						"Failed to get control option (no {}) {}",
+						option_num,
+						status
+					);
+				}
+				info!("tl-x: {}", value);
+			} else if name == CStr::from_bytes_with_nul_unchecked(b"tl-y\0") {
+				let mut value = 0_i32;
+
+				let status: sane::SANE_Status = libsane.sane_control_option(
+					device_handle.0,
+					option_num,
+					sane::SANE_Action_SANE_ACTION_GET_VALUE,
+					(&mut value as *mut i32).cast::<c_void>(),
+					std::ptr::null_mut(),
+				);
+				if status != sane::SANE_Status_SANE_STATUS_GOOD {
+					bail!(
+						"Failed to get control option (no {}) {}",
+						option_num,
+						status
+					);
+				}
+				info!("tl-y: {}", value);
+			} else if name == CStr::from_bytes_with_nul_unchecked(b"br-x\0") {
+				let mut value = 0_i32;
+
+				let status: sane::SANE_Status = libsane.sane_control_option(
+					device_handle.0,
+					option_num,
+					sane::SANE_Action_SANE_ACTION_GET_VALUE,
+					(&mut value as *mut i32).cast::<c_void>(),
+					std::ptr::null_mut(),
+				);
+				if status != sane::SANE_Status_SANE_STATUS_GOOD {
+					bail!(
+						"Failed to get control option (no {}) {}",
+						option_num,
+						status
+					);
+				}
+				info!("br-x: {}", value);
+			} else if name == CStr::from_bytes_with_nul_unchecked(b"br-y\0") {
+				let mut value = 0_i32;
+
+				let status: sane::SANE_Status = libsane.sane_control_option(
+					device_handle.0,
+					option_num,
+					sane::SANE_Action_SANE_ACTION_GET_VALUE,
+					(&mut value as *mut i32).cast::<c_void>(),
+					std::ptr::null_mut(),
+				);
+				if status != sane::SANE_Status_SANE_STATUS_GOOD {
+					bail!(
+						"Failed to get control option (no {}) {}",
+						option_num,
+						status
+					);
+				}
+				info!("br-y: {}", value);
 			}
 		}
 	}
@@ -228,36 +336,36 @@ fn main() -> anyhow::Result<()> {
 	info!("\tDepth {}.", sane_parameters.format);
 
 	// 10 MB buf for the image
-	let mut image = Vec::<u8>::with_capacity(10 * 1024 * 1024);
+	let mut image = Vec::<u8>::with_capacity(100 * 1024 * 1024);
 
-	let mut buf = Vec::<u8>::with_capacity(1024 * 1024 * 1024);
+	let mut buf = Vec::<u8>::with_capacity(1024 * 1024);
 	let mut bytes_written = 0_i32;
 	loop {
-		let mut sane_parameters = sane::SANE_Parameters {
-			format: 0,
-			last_frame: 0,
-			bytes_per_line: 0,
-			pixels_per_line: 0,
-			lines: 0,
-			depth: 0,
-		};
-		let status = unsafe {
-			libsane.sane_get_parameters(
-				device_handle.0,
-				&mut sane_parameters as *mut sane::SANE_Parameters,
-			)
-		};
-		if status != sane::SANE_Status_SANE_STATUS_GOOD {
-			bail!("Failed to get scan parameters {}.", status);
-		}
+		// let mut sane_parameters = sane::SANE_Parameters {
+		// 	format: 0,
+		// 	last_frame: 0,
+		// 	bytes_per_line: 0,
+		// 	pixels_per_line: 0,
+		// 	lines: 0,
+		// 	depth: 0,
+		// };
+		// let status = unsafe {
+		// 	libsane.sane_get_parameters(
+		// 		device_handle.0,
+		// 		&mut sane_parameters as *mut sane::SANE_Parameters,
+		// 	)
+		// };
+		// if status != sane::SANE_Status_SANE_STATUS_GOOD {
+		// 	bail!("Failed to get scan parameters {}.", status);
+		// }
 
-		info!("Print parameters:");
-		info!("\tFormat {}.", sane_parameters.format);
-		info!("\tLast Frame {}.", sane_parameters.format);
-		info!("\tBytes per line {}.", sane_parameters.format);
-		info!("\tPixels per line {}.", sane_parameters.format);
-		info!("\tLines {}.", sane_parameters.format);
-		info!("\tDepth {}.", sane_parameters.format);
+		// info!("Print parameters:");
+		// info!("\tFormat {}.", sane_parameters.format);
+		// info!("\tLast Frame {}.", sane_parameters.format);
+		// info!("\tBytes per line {}.", sane_parameters.format);
+		// info!("\tPixels per line {}.", sane_parameters.format);
+		// info!("\tLines {}.", sane_parameters.format);
+		// info!("\tDepth {}.", sane_parameters.format);
 
 		unsafe {
 			buf.set_len(0);
