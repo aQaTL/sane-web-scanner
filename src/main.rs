@@ -1,5 +1,6 @@
 use anyhow::bail;
-use log::debug;
+use log::{debug, info};
+use std::ffi::CStr;
 
 mod sane {
 	#![allow(non_upper_case_globals)]
@@ -53,17 +54,28 @@ fn main() -> anyhow::Result<()> {
 		bail!("Failed to get devices {}", status);
 	}
 	let list_len = unsafe {
-		let mut device_list: *mut *const sane::SANE_Device = device_list;
 		let mut list_len = 0_isize;
-		while !(*device_list).is_null() {
+		while !(*device_list.offset(list_len)).is_null() {
 			list_len += 1;
-			device_list = device_list.add(1);
 		}
 		list_len as usize
 	};
 	debug!("Number of devices found: {}", list_len);
 	let device_list: &[*const sane::SANE_Device] =
 		unsafe { std::slice::from_raw_parts(device_list, list_len) };
+
+	for (idx, device) in device_list.iter().copied().enumerate() {
+		unsafe {
+			let name = CStr::from_ptr((*device).name).to_string_lossy();
+			let vendor = CStr::from_ptr((*device).vendor).to_string_lossy();
+			let model = CStr::from_ptr((*device).model).to_string_lossy();
+			let type_ = CStr::from_ptr((*device).type_).to_string_lossy();
+			info!("{}. {}", idx + 1, model);
+			info!("\tVendor: {}", vendor);
+			info!("\tName: {}", name);
+			info!("\tType: {}", type_);
+		}
+	}
 	debug!("gitara");
 
 	Ok(())
