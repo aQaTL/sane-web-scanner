@@ -11,7 +11,7 @@ mod sane {
 
 	impl Drop for libsane {
 		fn drop(&mut self) {
-            unsafe {
+			unsafe {
 				self.sane_exit();
 			}
 		}
@@ -45,24 +45,25 @@ fn main() -> anyhow::Result<()> {
 	debug!("gitara");
 
 	let mut device_list: *mut *const sane::SANE_Device = std::ptr::null_mut();
+
 	let status: sane::SANE_Status = unsafe {
 		libsane.sane_get_devices(&mut device_list as *mut *mut *const sane::SANE_Device, 1)
 	};
 	if status != sane::SANE_Status_SANE_STATUS_GOOD {
 		bail!("Failed to get devices {}", status);
 	}
-    debug!("counting device list");
 	let list_len = unsafe {
-		let device_list: *const sane::SANE_Device = *device_list;
+		let mut device_list: *mut *const sane::SANE_Device = device_list;
 		let mut list_len = 0_isize;
-        while !device_list.offset(list_len).is_null() {
+		while !(*device_list).is_null() {
 			list_len += 1;
-			debug!("{}", list_len);
+			device_list = device_list.add(1);
 		}
 		list_len as usize
 	};
 	debug!("Number of devices found: {}", list_len);
-	let device_list: &[*const sane::SANE_Device] = unsafe { std::slice::from_raw_parts(device_list, list_len) };
+	let device_list: &[*const sane::SANE_Device] =
+		unsafe { std::slice::from_raw_parts(device_list, list_len) };
 	debug!("gitara");
 
 	Ok(())
