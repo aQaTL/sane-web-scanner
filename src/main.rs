@@ -7,6 +7,7 @@ mod sane {
 	#![allow(non_camel_case_types)]
 	#![allow(non_snake_case)]
 	#![allow(dead_code)]
+	#![allow(clippy::unused_unit)]
 
 	include!(concat!(env!("OUT_DIR"), "/sane.rs"));
 
@@ -182,7 +183,7 @@ fn main() -> anyhow::Result<()> {
 						list_len += 1;
 					}
 					let string_list_vec = std::slice::from_raw_parts(string_list, list_len)
-						.into_iter()
+						.iter()
 						.map(|&str_ptr| CStr::from_ptr(str_ptr).to_string_lossy())
 						.collect::<Vec<_>>();
 					info!("\tPossible values: {:?}", string_list_vec);
