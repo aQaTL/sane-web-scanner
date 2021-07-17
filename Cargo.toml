@@ -10,6 +10,8 @@ anyhow = "1.0.42"
 libloading = "0.7.0"
 log = "0.4.14"
 flexi_logger = "0.18.0"
+actix-web = "4.0.0-beta.8"
+systemd-socket-activation = { git = "https://github.com/aQaTL/systemd-socket-activation", rev = "a80c15060a07830483f1290f7ef4b8543f97d43b" }
 
 [build-dependencies]
 bindgen = "0.58.1"

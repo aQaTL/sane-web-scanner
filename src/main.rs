@@ -2,8 +2,10 @@ use std::ffi::{c_void, CStr};
 use std::io::Write;
 use std::path::Path;
 
+use actix_web::{get, App, HttpResponse, HttpServer};
 use anyhow::bail;
-use log::{debug, info};
+use log::{debug, error, info, warn};
+use systemd_socket_activation::systemd_socket_activation;
 
 mod sane {
 	//! API docs: <https://sane-project.gitlab.io/standard/1.06/api.html>
@@ -33,9 +35,72 @@ const fn log_str() -> &'static str {
 	}
 }
 
-fn main() -> anyhow::Result<()> {
+#[actix_web::main]
+async fn main() -> anyhow::Result<()> {
 	flexi_logger::Logger::try_with_str(log_str())?.start()?;
 
+	let mut http_server = HttpServer::new(|| App::new().service(scan_service));
+
+	let (address, port) = ("0.0.0.0", 8000_u16);
+
+	match systemd_socket_activation() {
+		Ok(sockets) if !sockets.is_empty() => {
+			info!("Using systemd provided sockets instead");
+			for socket in sockets {
+				http_server = http_server.listen(socket)?;
+			}
+		}
+		Err(systemd_socket_activation::Error::LibLoadingFailedToLoadSystemd(e))
+			if cfg!(target_os = "linux") =>
+		{
+			warn!("libsystemd not found: {}", e);
+			http_server = http_server.bind(format!("{}:{}", address, port))?;
+		}
+		Err(e) => {
+			error!("Systemd socket activation failed: {:?}", e);
+			http_server = http_server.bind(format!("{}:{}", address, port))?;
+		}
+		// Call to systemd was successful, but didn't return any sockets
+		Ok(_) => {
+			http_server = http_server.bind(format!("{}:{}", address, port))?;
+		}
+	}
+
+	http_server.run().await?;
+
+	Ok(())
+}
+
+#[get("/scan")]
+async fn scan_service() -> HttpResponse {
+	// TODO(aQaTL): Stream the data
+	//  Possibly via a websocket?
+	let mut image = scan().unwrap();
+
+	info!("Scan completed. Saving to file.");
+
+	// BMP is BGR by default, while our image is assumed to be RGB. This swaps red channel with blue.
+	for chunk in image.raw_data.chunks_exact_mut(3) {
+		chunk.swap(0, 2);
+	}
+
+	save_as_bmp(
+		"./scanned_document.bmp".as_ref(),
+		&image.raw_data,
+		(image.width, image.height),
+	)
+	.unwrap();
+
+	HttpResponse::Ok().body("git")
+}
+
+struct ScanImage {
+	raw_data: Vec<u8>,
+	width: u32,
+	height: u32,
+}
+
+fn scan() -> anyhow::Result<ScanImage> {
 	let libsane = unsafe { sane::libsane::new("libsane.so.1")? };
 
 	let build_ver_major = 1;
@@ -83,7 +148,7 @@ fn main() -> anyhow::Result<()> {
 	}
 
 	if device_list.is_empty() {
-		return Ok(());
+		bail!("No scanners found.");
 	}
 
 	let mut device_handle: sane::SANE_Handle = std::ptr::null_mut();
@@ -333,8 +398,8 @@ fn main() -> anyhow::Result<()> {
 	info!("\tLines {}.", sane_parameters.lines);
 	info!("\tDepth {}.", sane_parameters.depth);
 
-	let width = sane_parameters.pixels_per_line;
-	let height = sane_parameters.lines;
+	let width = sane_parameters.pixels_per_line as u32;
+	let height = sane_parameters.lines as u32;
 
 	info!("Width: {}.", width);
 	info!("Height: {}.", height);
@@ -379,20 +444,11 @@ fn main() -> anyhow::Result<()> {
 		libsane.sane_cancel(device_handle.0);
 	}
 
-	info!("Scan completed. Saving to file.");
-
-	// BMP is BGR by default, while our image is assumed to be RGB. This swaps red channel with blue.
-	for chunk in image.chunks_exact_mut(3) {
-		chunk.swap(0, 2);
-	}
-
-	save_as_bmp(
-		"./scanned_document.bmp".as_ref(),
-		&image,
-		(width as u32, height as u32),
-	)?;
-
-	Ok(())
+	Ok(ScanImage {
+		raw_data: image,
+		width,
+		height,
+	})
 }
 
 fn save_as_bmp(path: &Path, img: &[u8], (width, height): (u32, u32)) -> Result<(), std::io::Error> {
