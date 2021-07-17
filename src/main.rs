@@ -1,8 +1,9 @@
-use anyhow::bail;
-use log::{debug, info};
 use std::ffi::{c_void, CStr};
 use std::io::Write;
 use std::path::Path;
+
+use anyhow::bail;
+use log::{debug, info};
 
 mod sane {
 	//! API docs: <https://sane-project.gitlab.io/standard/1.06/api.html>
@@ -97,31 +98,6 @@ fn main() -> anyhow::Result<()> {
 	}
 	let device_handle = unsafe { Device::from_raw_handle(device_handle, &libsane) };
 
-	let option_count_descriptor = unsafe { libsane.sane_get_option_descriptor(device_handle.0, 0) };
-	if option_count_descriptor.is_null() {
-		bail!("Failed to get option count");
-	}
-
-	unsafe {
-		info!(
-			"{:?}",
-			CStr::from_ptr((*option_count_descriptor).name).to_string_lossy()
-		);
-		info!(
-			"{:?}",
-			CStr::from_ptr((*option_count_descriptor).title).to_string_lossy()
-		);
-		info!(
-			"{:?}",
-			CStr::from_ptr((*option_count_descriptor).desc).to_string_lossy()
-		);
-		info!("{:?}", (*option_count_descriptor).type_);
-		info!("{:?}", (*option_count_descriptor).unit);
-		info!("{:?}", (*option_count_descriptor).size);
-		info!("{:?}", (*option_count_descriptor).cap);
-		info!("{:?}", (*option_count_descriptor).constraint_type);
-	}
-
 	let mut option_count_value = 0_i32;
 	let status: sane::SANE_Status = unsafe {
 		libsane.sane_control_option(
@@ -135,11 +111,7 @@ fn main() -> anyhow::Result<()> {
 	if status != sane::SANE_Status_SANE_STATUS_GOOD {
 		bail!("Failed to get control option (option count) {}", status);
 	}
-	println!("Number of available options: {}.", option_count_value);
-
-	let (mut width, mut height) = (0, 0);
-
-	let mut dpi = 0_i32;
+	debug!("Number of available options: {}.", option_count_value);
 
 	for option_num in 1..option_count_value {
 		let option_descriptor =
@@ -161,11 +133,14 @@ fn main() -> anyhow::Result<()> {
 				"\t{:?}",
 				CStr::from_ptr((*option_descriptor).desc).to_string_lossy()
 			);
-			info!("\t{:?}", (*option_descriptor).type_);
-			info!("\t{:?}", (*option_descriptor).unit);
-			info!("\t{:?}", (*option_descriptor).size);
-			info!("\t{:?}", (*option_descriptor).cap);
-			info!("\t{:?}", (*option_descriptor).constraint_type);
+			info!(
+				"Type {:?}. Unit {:?}. Size {:?}. Cap {:?}. Constraint type {:?}",
+				(*option_descriptor).type_,
+				(*option_descriptor).unit,
+				(*option_descriptor).size,
+				(*option_descriptor).cap,
+				(*option_descriptor).constraint_type
+			);
 			match (*option_descriptor).constraint_type {
 				sane::SANE_Constraint_Type_SANE_CONSTRAINT_NONE => (),
 				sane::SANE_Constraint_Type_SANE_CONSTRAINT_RANGE => {
@@ -237,6 +212,7 @@ fn main() -> anyhow::Result<()> {
 				}
 				info!("Additional status: {:b}.", additional_status);
 
+				let mut dpi = 0_i32;
 				let status: sane::SANE_Status = libsane.sane_control_option(
 					device_handle.0,
 					option_num,
@@ -247,6 +223,7 @@ fn main() -> anyhow::Result<()> {
 				if status != sane::SANE_Status_SANE_STATUS_GOOD {
 					bail!("Failed to fetch back set dpi setting {}.", status);
 				}
+				info!("DPI set to {}.", dpi);
 			} else if name == CStr::from_bytes_with_nul_unchecked(b"tl-x\0") {
 				// 2 3 4 5 1
 				let mut value = 0_i32;
@@ -302,12 +279,6 @@ fn main() -> anyhow::Result<()> {
 					);
 				}
 				info!("br-x: {}", value);
-
-				let range = (*option_descriptor).constraint.range;
-				// TODO(aQaTL): This code assumes we're using millimeters, we could be using pixels.
-				let width_millimeters = (*range).max as f64 / (*range).quant as f64;
-				let width_inches = width_millimeters / 10.0 / 2.54;
-				width = (width_inches * dpi as f64).round() as i32;
 			} else if name == CStr::from_bytes_with_nul_unchecked(b"br-y\0") {
 				let mut value = 0_i32;
 
@@ -326,18 +297,9 @@ fn main() -> anyhow::Result<()> {
 					);
 				}
 				info!("br-y: {}", value);
-
-				let range = (*option_descriptor).constraint.range;
-				// TODO(aQaTL): This code assumes we're using millimeters, we could be using pixels.
-				let height_millimeters = (*range).max as f64 / (*range).quant as f64;
-				let height_inches = height_millimeters / 10.0 / 2.54;
-				height = (height_inches * dpi as f64).round() as i32;
 			}
 		}
 	}
-
-	info!("Width: {}.", width);
-	info!("Height: {}.", height);
 
 	let status = unsafe { libsane.sane_start(device_handle.0) };
 	if status != sane::SANE_Status_SANE_STATUS_GOOD {
@@ -365,11 +327,17 @@ fn main() -> anyhow::Result<()> {
 
 	info!("Print parameters:");
 	info!("\tFormat {}.", sane_parameters.format);
-	info!("\tLast Frame {}.", sane_parameters.format);
-	info!("\tBytes per line {}.", sane_parameters.format);
-	info!("\tPixels per line {}.", sane_parameters.format);
-	info!("\tLines {}.", sane_parameters.format);
-	info!("\tDepth {}.", sane_parameters.format);
+	info!("\tLast Frame {}.", sane_parameters.last_frame);
+	info!("\tBytes per line {}.", sane_parameters.bytes_per_line);
+	info!("\tPixels per line {}.", sane_parameters.pixels_per_line);
+	info!("\tLines {}.", sane_parameters.lines);
+	info!("\tDepth {}.", sane_parameters.depth);
+
+	let width = sane_parameters.pixels_per_line;
+	let height = sane_parameters.lines;
+
+	info!("Width: {}.", width);
+	info!("Height: {}.", height);
 
 	// 10 MB buf for the image
 	let mut image = Vec::<u8>::with_capacity(100 * 1024 * 1024);
@@ -377,32 +345,6 @@ fn main() -> anyhow::Result<()> {
 	let mut buf = Vec::<u8>::with_capacity(1024 * 1024);
 	let mut bytes_written = 0_i32;
 	loop {
-		// let mut sane_parameters = sane::SANE_Parameters {
-		// 	format: 0,
-		// 	last_frame: 0,
-		// 	bytes_per_line: 0,
-		// 	pixels_per_line: 0,
-		// 	lines: 0,
-		// 	depth: 0,
-		// };
-		// let status = unsafe {
-		// 	libsane.sane_get_parameters(
-		// 		device_handle.0,
-		// 		&mut sane_parameters as *mut sane::SANE_Parameters,
-		// 	)
-		// };
-		// if status != sane::SANE_Status_SANE_STATUS_GOOD {
-		// 	bail!("Failed to get scan parameters {}.", status);
-		// }
-
-		// info!("Print parameters:");
-		// info!("\tFormat {}.", sane_parameters.format);
-		// info!("\tLast Frame {}.", sane_parameters.format);
-		// info!("\tBytes per line {}.", sane_parameters.format);
-		// info!("\tPixels per line {}.", sane_parameters.format);
-		// info!("\tLines {}.", sane_parameters.format);
-		// info!("\tDepth {}.", sane_parameters.format);
-
 		unsafe {
 			buf.set_len(0);
 		}
@@ -433,32 +375,6 @@ fn main() -> anyhow::Result<()> {
 		image.extend_from_slice(&buf);
 	}
 
-	let mut sane_parameters = sane::SANE_Parameters {
-		format: 0,
-		last_frame: 0,
-		bytes_per_line: 0,
-		pixels_per_line: 0,
-		lines: 0,
-		depth: 0,
-	};
-	let status = unsafe {
-		libsane.sane_get_parameters(
-			device_handle.0,
-			&mut sane_parameters as *mut sane::SANE_Parameters,
-		)
-	};
-	if status != sane::SANE_Status_SANE_STATUS_GOOD {
-		bail!("Failed to get scan parameters {}.", status);
-	}
-
-	info!("Print parameters:");
-	info!("\tFormat {}.", sane_parameters.format);
-	info!("\tLast Frame {}.", sane_parameters.format);
-	info!("\tBytes per line {}.", sane_parameters.format);
-	info!("\tPixels per line {}.", sane_parameters.format);
-	info!("\tLines {}.", sane_parameters.format);
-	info!("\tDepth {}.", sane_parameters.format);
-
 	unsafe {
 		libsane.sane_cancel(device_handle.0);
 	}
@@ -466,11 +382,10 @@ fn main() -> anyhow::Result<()> {
 	info!("Scan completed. Saving to file.");
 	std::fs::write("./scanned_document", image.as_slice())?;
 
-	// TODO(aQaTL): Figure out why we're missing 10 pixels (height is being reported as 2550).
 	save_as_bmp(
 		"./scanned_document.bmp".as_ref(),
 		&mut image,
-		(2560 as u32, height as u32),
+		(width as u32, height as u32),
 	)?;
 
 	Ok(())
@@ -498,7 +413,7 @@ fn save_as_bmp(
 	// image header
 	file.write_all(&image_header_size.to_le_bytes())?;
 	file.write_all(&width.to_le_bytes())?;
-	file.write_all(&(height as i32 * -1).to_le_bytes())?;
+	file.write_all(&(-(height as i32)).to_le_bytes())?;
 	file.write_all(&1_u16.to_le_bytes())?;
 	file.write_all(&24_u16.to_le_bytes())?;
 	file.write_all(&0_u32.to_le_bytes())?;
@@ -509,9 +424,7 @@ fn save_as_bmp(
 	file.write_all(&0_u32.to_le_bytes())?;
 
 	for chunk in img.chunks_exact_mut(3) {
-		let tmp = chunk[0];
-		chunk[0] = chunk[2];
-		chunk[2] = tmp;
+		chunk.swap(0, 2);
 	}
 
 	file.write_all(img)?;
