@@ -380,22 +380,22 @@ fn main() -> anyhow::Result<()> {
 	}
 
 	info!("Scan completed. Saving to file.");
-	std::fs::write("./scanned_document", image.as_slice())?;
+
+	// BMP is BGR by default, while our image is assumed to be RGB. This swaps red channel with blue.
+	for chunk in image.chunks_exact_mut(3) {
+		chunk.swap(0, 2);
+	}
 
 	save_as_bmp(
 		"./scanned_document.bmp".as_ref(),
-		&mut image,
+		&image,
 		(width as u32, height as u32),
 	)?;
 
 	Ok(())
 }
 
-fn save_as_bmp(
-	path: &Path,
-	img: &mut [u8],
-	(width, height): (u32, u32),
-) -> Result<(), std::io::Error> {
+fn save_as_bmp(path: &Path, img: &[u8], (width, height): (u32, u32)) -> Result<(), std::io::Error> {
 	let mut file = std::fs::File::create(path)?;
 
 	let file_header_size: u32 = 2 + 4 + 2 + 2 + 4;
@@ -422,10 +422,6 @@ fn save_as_bmp(
 	file.write_all(&0_u32.to_le_bytes())?;
 	file.write_all(&0_u32.to_le_bytes())?;
 	file.write_all(&0_u32.to_le_bytes())?;
-
-	for chunk in img.chunks_exact_mut(3) {
-		chunk.swap(0, 2);
-	}
 
 	file.write_all(img)?;
 
