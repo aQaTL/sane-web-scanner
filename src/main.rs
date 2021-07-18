@@ -27,6 +27,20 @@ mod sane {
 	}
 }
 
+struct Device<'a>(pub sane::SANE_Handle, &'a sane::libsane);
+
+impl<'a> Device<'a> {
+	pub unsafe fn from_raw_handle(handle: sane::SANE_Handle, libsane: &'a sane::libsane) -> Self {
+		Device(handle, libsane)
+	}
+}
+
+impl Drop for Device<'_> {
+	fn drop(&mut self) {
+		unsafe { self.1.sane_close(self.0) }
+	}
+}
+
 const fn log_str() -> &'static str {
 	if cfg!(debug_assertions) {
 		"debug"
@@ -109,7 +123,10 @@ async fn scan_service() -> HttpResponse {
 	)
 	.unwrap();
 
-	HttpResponse::Ok().body("git")
+	let mut bmp_img = Vec::with_capacity(image.raw_data.len() + BMP_HEADER_SIZE as usize);
+	encode_as_bmp(&image.raw_data, (image.width, image.height), &mut bmp_img).unwrap();
+
+	HttpResponse::Ok().content_type("image/bmp").body(bmp_img)
 }
 
 struct ScanImage {
@@ -469,55 +486,49 @@ fn scan() -> anyhow::Result<ScanImage> {
 	})
 }
 
-fn save_as_bmp(path: &Path, img: &[u8], (width, height): (u32, u32)) -> Result<(), std::io::Error> {
-	let mut file = std::fs::File::create(path)?;
+const BMP_FILE_HEADER_SIZE: u32 = 2 + 4 + 2 + 2 + 4;
+const BMP_IMAGE_HEADER_SIZE: u32 = 4 + 4 + 4 + 2 + 2 + 4 + 4 + 4 + 4 + 4 + 4;
+const BMP_HEADER_SIZE: u32 = BMP_FILE_HEADER_SIZE + BMP_IMAGE_HEADER_SIZE;
 
-	let file_header_size: u32 = 2 + 4 + 2 + 2 + 4;
-	let image_header_size: u32 = 4 + 4 + 4 + 2 + 2 + 4 + 4 + 4 + 4 + 4 + 4;
-
+fn encode_as_bmp<W: Write>(
+	img: &[u8],
+	(width, height): (u32, u32),
+	out: &mut W,
+) -> std::io::Result<()> {
 	// file header
-	file.write_all(&[b'B', b'M'])?;
-	let file_size = file_header_size + image_header_size + img.len() as u32;
-	file.write_all(&file_size.to_le_bytes())?;
-	file.write_all(&[0, 0])?;
-	file.write_all(&[0, 0])?;
-	let pixel_data_offset = file_header_size + image_header_size;
-	file.write_all(&pixel_data_offset.to_le_bytes())?;
+	out.write_all(&[b'B', b'M'])?;
+	let file_size = BMP_HEADER_SIZE + img.len() as u32;
+	out.write_all(&file_size.to_le_bytes())?;
+	out.write_all(&[0, 0])?;
+	out.write_all(&[0, 0])?;
+	out.write_all(&BMP_HEADER_SIZE.to_le_bytes())?;
 
 	// image header
-	file.write_all(&image_header_size.to_le_bytes())?;
-	file.write_all(&width.to_le_bytes())?;
-	file.write_all(&(-(height as i32)).to_le_bytes())?;
-	file.write_all(&1_u16.to_le_bytes())?;
-	file.write_all(&24_u16.to_le_bytes())?;
-	file.write_all(&0_u32.to_le_bytes())?;
-	file.write_all(&0_u32.to_le_bytes())?;
-	file.write_all(&0_u32.to_le_bytes())?;
-	file.write_all(&0_u32.to_le_bytes())?;
-	file.write_all(&0_u32.to_le_bytes())?;
-	file.write_all(&0_u32.to_le_bytes())?;
+	out.write_all(&BMP_IMAGE_HEADER_SIZE.to_le_bytes())?;
+	out.write_all(&width.to_le_bytes())?;
+	out.write_all(&(-(height as i32)).to_le_bytes())?;
+	out.write_all(&1_u16.to_le_bytes())?;
+	out.write_all(&24_u16.to_le_bytes())?;
+	out.write_all(&0_u32.to_le_bytes())?;
+	out.write_all(&0_u32.to_le_bytes())?;
+	out.write_all(&0_u32.to_le_bytes())?;
+	out.write_all(&0_u32.to_le_bytes())?;
+	out.write_all(&0_u32.to_le_bytes())?;
+	out.write_all(&0_u32.to_le_bytes())?;
 
-	file.write_all(img)?;
+	out.write_all(img)?;
 
+	Ok(())
+}
+
+fn save_as_bmp(path: &Path, img: &[u8], (width, height): (u32, u32)) -> std::io::Result<()> {
+	let mut file = std::fs::File::create(path)?;
+	encode_as_bmp(img, (width, height), &mut file)?;
 	Ok(())
 }
 
 fn rgb_to_bgr(image: &mut [u8]) {
 	for chunk in image.chunks_exact_mut(3) {
 		chunk.swap(0, 2);
-	}
-}
-
-struct Device<'a>(pub sane::SANE_Handle, &'a sane::libsane);
-
-impl<'a> Device<'a> {
-	pub unsafe fn from_raw_handle(handle: sane::SANE_Handle, libsane: &'a sane::libsane) -> Self {
-		Device(handle, libsane)
-	}
-}
-
-impl Drop for Device<'_> {
-	fn drop(&mut self) {
-		unsafe { self.1.sane_close(self.0) }
 	}
 }
