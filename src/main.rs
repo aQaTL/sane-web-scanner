@@ -39,6 +39,26 @@ const fn log_str() -> &'static str {
 async fn main() -> anyhow::Result<()> {
 	flexi_logger::Logger::try_with_str(log_str())?.start()?;
 
+	if std::env::args()
+		.nth(1)
+		.map(|arg| arg == "--just-scan")
+		.unwrap_or_default()
+	{
+		let mut image = scan()?;
+
+		info!("Scan completed. Saving to file.");
+
+		rgb_to_bgr(&mut image.raw_data);
+
+		save_as_bmp(
+			"./scanned_document.bmp".as_ref(),
+			&image.raw_data,
+			(image.width, image.height),
+		)?;
+
+		return Ok(());
+	}
+
 	let mut http_server = HttpServer::new(|| App::new().service(scan_service));
 
 	let (address, port) = ("0.0.0.0", 8000_u16);
@@ -80,9 +100,7 @@ async fn scan_service() -> HttpResponse {
 	info!("Scan completed. Saving to file.");
 
 	// BMP is BGR by default, while our image is assumed to be RGB. This swaps red channel with blue.
-	for chunk in image.raw_data.chunks_exact_mut(3) {
-		chunk.swap(0, 2);
-	}
+	rgb_to_bgr(&mut image.raw_data);
 
 	save_as_bmp(
 		"./scanned_document.bmp".as_ref(),
@@ -482,6 +500,12 @@ fn save_as_bmp(path: &Path, img: &[u8], (width, height): (u32, u32)) -> Result<(
 	file.write_all(img)?;
 
 	Ok(())
+}
+
+fn rgb_to_bgr(image: &mut [u8]) {
+	for chunk in image.chunks_exact_mut(3) {
+		chunk.swap(0, 2);
+	}
 }
 
 struct Device<'a>(pub sane::SANE_Handle, &'a sane::libsane);
