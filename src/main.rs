@@ -58,11 +58,7 @@ const fn log_str() -> &'static str {
 fn main() -> anyhow::Result<()> {
 	flexi_logger::Logger::try_with_str(log_str())?.start()?;
 
-	if std::env::args()
-		.nth(1)
-		.map(|arg| arg == "--just-scan")
-		.unwrap_or_default()
-	{
+	if std::env::args().skip(1).any(|arg| arg == "--just-scan") {
 		return scan_to_file();
 	}
 
@@ -89,7 +85,14 @@ fn scan_to_file() -> anyhow::Result<()> {
 async fn run_webserver() -> anyhow::Result<()> {
 	let mut http_server = HttpServer::new(|| App::new().service(scan_service));
 
-	let (address, port) = ("0.0.0.0", 8000_u16);
+	let port = std::env::args()
+		.skip(1)
+		.find(|arg| arg.starts_with("-p="))
+		.and_then(|port| port.strip_prefix("-p=").map(ToString::to_string))
+		.unwrap_or("8000".to_string())
+		.parse::<u16>()?;
+
+	let (address, port) = ("0.0.0.0", port);
 
 	match systemd_socket_activation() {
 		Ok(sockets) if !sockets.is_empty() => {
