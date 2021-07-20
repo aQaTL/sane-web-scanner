@@ -542,7 +542,7 @@ fn scan_stream_bmp(
 			}
 			device_count
 		};
-		debug!("Number of devices found: {}.", device_count);
+		info!("Number of devices found: {}.", device_count);
 		let device_list: &[*const sane::SANE_Device] =
 			unsafe { std::slice::from_raw_parts(device_list, device_count) };
 
