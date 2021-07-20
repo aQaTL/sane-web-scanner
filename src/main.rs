@@ -56,7 +56,7 @@ const fn log_str() -> &'static str {
 }
 
 fn main() -> anyhow::Result<()> {
-	flexi_logger::Logger::try_with_str(log_str())?.start()?;
+	flexi_logger::Logger::try_with_env_or_str(log_str())?.start()?;
 
 	if std::env::args().skip(1).any(|arg| arg == "--just-scan") {
 		return scan_to_file();
