@@ -1,14 +1,14 @@
 use std::ffi::{c_void, CStr};
+use std::fmt::{Display, Formatter};
 use std::io::Write;
 use std::path::Path;
 
 use actix_web::web::Bytes;
-use actix_web::{get, App, HttpResponse, HttpServer, ResponseError};
+use actix_web::{get, post, web, App, HttpResponse, HttpServer, ResponseError};
 use anyhow::{anyhow, bail};
 use futures::task::Context;
-use futures::Stream;
+use futures::{Stream, StreamExt};
 use log::{debug, error, info, warn};
-use std::fmt::{Display, Formatter};
 use systemd_socket_activation::systemd_socket_activation;
 use tokio::macros::support::{Pin, Poll};
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -88,7 +88,8 @@ fn scan_to_file() -> anyhow::Result<()> {
 
 #[actix_web::main]
 async fn run_webserver() -> anyhow::Result<()> {
-	let mut http_server = HttpServer::new(|| App::new().service(scan_service));
+	let mut http_server =
+		HttpServer::new(|| App::new().service(scan_service).service(echo_service));
 
 	let port = std::env::args()
 		.skip(1)
@@ -142,6 +143,19 @@ impl From<anyhow::Error> for ScanServiceError {
 	fn from(e: anyhow::Error) -> Self {
 		ScanServiceError(e)
 	}
+}
+
+#[post("/echo")]
+async fn echo_service(mut payload: web::Payload) -> Result<Bytes, actix_web::Error> {
+	let mut body = web::BytesMut::new();
+	while let Some(chunk) = payload.next().await {
+		let chunk = chunk?;
+		body.extend_from_slice(&chunk);
+	}
+
+	debug!("Received {:?}. Echoing it", &body);
+
+	Ok(body.freeze())
 }
 
 #[get("/scan.bmp")]
@@ -243,7 +257,7 @@ fn init_libsane() -> anyhow::Result<sane::libsane> {
 	Ok(libsane)
 }
 
-fn try_start_scanning<'a>(libsane: &'a sane::libsane) -> anyhow::Result<(Device<'a>, u32, u32)> {
+fn try_start_scanning(libsane: &sane::libsane) -> anyhow::Result<(Device, u32, u32)> {
 	info!("Fetching printers.");
 	let mut device_list: *mut *const sane::SANE_Device = std::ptr::null_mut();
 	let status: sane::SANE_Status = unsafe {
@@ -549,6 +563,7 @@ async fn scan_stream_bmp() -> StreamingReceiver<Result<Bytes, anyhow::Error>> {
 		let (device_handle, width, height) = match try_start_scanning(&libsane) {
 			Ok(v) => v,
 			Err(e) => {
+				error!("sending {:?}", e);
 				sender.send(Err(e)).unwrap();
 				return;
 			}
