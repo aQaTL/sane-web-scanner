@@ -1,0 +1,321 @@
+//! API docs: <https://sane-project.gitlab.io/standard/1.06/api.html>
+
+pub mod sys;
+
+use bitflags::bitflags;
+use log::{debug, info};
+use std::ffi::{c_void, CStr, CString};
+use std::fmt::{Display, Formatter};
+use std::ops::Range;
+
+type Result<T> = std::result::Result<T, Error>;
+
+#[derive(Debug)]
+pub struct Error(sys::Status);
+
+impl Display for Error {
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+		let status_description = unsafe { CStr::from_ptr(sys::sane_strstatus(self.0)) };
+		write!(f, "{}", status_description.to_string_lossy())
+	}
+}
+
+impl std::error::Error for Error {}
+
+pub struct Sane {}
+
+impl Drop for Sane {
+	fn drop(&mut self) {
+		unsafe {
+			log::debug!("Drop libsane.");
+			sys::sane_exit();
+		}
+	}
+}
+
+impl Sane {
+	pub fn init(version_code: *mut i32) -> Result<Self> {
+		let status = unsafe { sys::sane_init(version_code, None) };
+		if status != sys::Status::Good {
+			return Err(Error(status));
+		}
+		Ok(Sane {})
+	}
+
+	pub fn init_1_0() -> Result<Self> {
+		let build_ver_major = 1;
+		let build_ver_minor = 0;
+		let build_revision = 0;
+		let mut version_code: i32 =
+			build_ver_major << 24 | build_ver_minor << 16 | build_revision & 0xffff;
+		Self::init(&mut version_code as *mut sys::Int)
+	}
+
+	pub fn get_devices(&self) -> Result<Vec<Device>> {
+		let mut device_list: *mut *const sys::Device = std::ptr::null_mut();
+		let status: sys::Status =
+			unsafe { sys::sane_get_devices(&mut device_list as *mut *mut *const sys::Device, 1) };
+		if status != sys::Status::Good {
+			return Err(Error(status));
+		}
+		let device_count = unsafe {
+			let mut device_count = 0_usize;
+			while !(*device_list.add(device_count)).is_null() {
+				device_count += 1;
+			}
+			device_count
+		};
+		debug!("Number of devices found: {}.", device_count);
+		let device_list: &[*const sys::Device] =
+			unsafe { std::slice::from_raw_parts(device_list, device_count) };
+
+		let device_list: Vec<Device> = unsafe {
+			device_list
+				.iter()
+				.copied()
+				.map(|device| {
+					let name = CStr::from_ptr((*device).name).to_owned();
+					let vendor = CStr::from_ptr((*device).vendor).to_owned();
+					let model = CStr::from_ptr((*device).model).to_owned();
+					let type_ = CStr::from_ptr((*device).type_).to_owned();
+					Device {
+						name,
+						vendor,
+						model,
+						type_,
+					}
+				})
+				.collect()
+		};
+		Ok(device_list)
+	}
+}
+
+#[derive(Debug)]
+pub struct Device {
+	pub name: CString,
+	pub vendor: CString,
+	pub model: CString,
+	pub type_: CString,
+}
+
+impl Device {
+	pub fn open(&self) -> Result<DeviceHandle> {
+		let mut device_handle: sys::Handle = std::ptr::null_mut();
+		let status: sys::Status =
+			unsafe { sys::sane_open(self.name.as_ptr(), &mut device_handle as *mut sys::Handle) };
+		if status != sys::Status::Good {
+			return Err(Error(status));
+		}
+		Ok(DeviceHandle {
+			handle: device_handle,
+			scanning: false,
+		})
+	}
+}
+
+pub struct DeviceHandle {
+	handle: sys::Handle,
+	scanning: bool,
+}
+
+impl Drop for DeviceHandle {
+	fn drop(&mut self) {
+		unsafe {
+			if self.scanning {
+				sys::sane_cancel(self.handle);
+			}
+			debug!("Drop DeviceHandle");
+			sys::sane_close(self.handle)
+		}
+	}
+}
+
+impl DeviceHandle {
+	pub fn get_options(&self) -> Result<Vec<DeviceOption>> {
+		let mut option_count_value = 0_i32;
+		let status: sys::Status = unsafe {
+			sys::sane_control_option(
+				self.handle,
+				0,
+				sys::Action::GetValue,
+				(&mut option_count_value as *mut i32).cast::<c_void>(),
+				std::ptr::null_mut(),
+			)
+		};
+		if status != sys::Status::Good {
+			return Err(Error(status));
+		}
+		debug!("Number of available options: {}.", option_count_value);
+
+		let mut options = Vec::with_capacity(option_count_value as usize);
+
+		for option_num in 1..option_count_value {
+			let option_descriptor =
+				unsafe { sys::sane_get_option_descriptor(self.handle, option_num) };
+			if option_descriptor.is_null() {
+				return Err(Error(status));
+			}
+
+			unsafe {
+				let title = CStr::from_ptr((*option_descriptor).title).to_owned();
+				info!("{:?}", title.to_string_lossy());
+				let name = CStr::from_ptr((*option_descriptor).name).to_owned();
+				info!("\t{:?}", name.to_string_lossy());
+				let desc = CStr::from_ptr((*option_descriptor).desc).to_owned();
+				info!("\t{:?}", desc.to_string_lossy());
+
+				info!(
+					"Type {:?}. Unit {:?}. Size {:?}. Cap {:?}. Constraint type {:?}",
+					(*option_descriptor).type_,
+					(*option_descriptor).unit,
+					(*option_descriptor).size,
+					(*option_descriptor).cap,
+					(*option_descriptor).constraint_type
+				);
+				let constraint = match (*option_descriptor).constraint_type {
+					sys::ConstraintType::None => OptionConstraint::None,
+					sys::ConstraintType::Range => {
+						let range = (*option_descriptor).constraint.range;
+						info!(
+							"\tRange: {}-{}. Quant {}. Steps {}.",
+							(*range).min,
+							(*range).max,
+							(*range).quant,
+							(*range).max / (*range).quant,
+						);
+						OptionConstraint::Range {
+							range: (*range).min..(*range).max,
+							quant: (*range).quant,
+						}
+					}
+					sys::ConstraintType::WordList => {
+						let word_list = (*option_descriptor).constraint.word_list;
+						let list_len = *word_list;
+						let word_list_slice =
+							std::slice::from_raw_parts(word_list.add(1), list_len as usize);
+						info!("\tPossible values: {:?}", word_list_slice);
+						OptionConstraint::WordList(word_list_slice.to_vec())
+					}
+					sys::ConstraintType::StringList => {
+						let string_list = (*option_descriptor).constraint.string_list;
+						let mut list_len = 0;
+						while !(*(string_list.add(list_len))).is_null() {
+							list_len += 1;
+						}
+						let string_list_vec = std::slice::from_raw_parts(string_list, list_len)
+							.iter()
+							.map(|&str_ptr| CStr::from_ptr(str_ptr).to_owned())
+							.collect::<Vec<_>>();
+						info!("\tPossible values: {:?}", string_list_vec);
+						OptionConstraint::StringList(string_list_vec)
+					}
+				};
+
+				options.push(DeviceOption {
+					name,
+					title,
+					desc,
+					type_: (*option_descriptor).type_,
+					unit: (*option_descriptor).unit,
+					size: (*option_descriptor).size as u32,
+					cap: OptionCapability::from_bits_unchecked((*option_descriptor).cap as u32),
+					constraint,
+				});
+			}
+		}
+
+		Ok(options)
+	}
+
+	pub fn start_scan(&mut self) -> Result<(u32, u32)> {
+		let status = unsafe { sys::sane_start(self.handle) };
+		if status != sys::Status::Good {
+			return Err(Error(status));
+		}
+
+		let mut sane_parameters = sys::Parameters::default();
+
+		let status = unsafe {
+			sys::sane_get_parameters(self.handle, &mut sane_parameters as *mut sys::Parameters)
+		};
+		if status != sys::Status::Good {
+			return Err(Error(status));
+		}
+
+		self.scanning = true;
+
+		info!("Print parameters:");
+		info!("\tFormat {:?}.", sane_parameters.format);
+		info!("\tLast Frame {}.", sane_parameters.last_frame);
+		info!("\tBytes per line {}.", sane_parameters.bytes_per_line);
+		info!("\tPixels per line {}.", sane_parameters.pixels_per_line);
+		info!("\tLines {}.", sane_parameters.lines);
+		info!("\tDepth {}.", sane_parameters.depth);
+
+		let width = sane_parameters.pixels_per_line as u32;
+		let height = sane_parameters.lines as u32;
+		Ok((width, height))
+	}
+
+	pub fn read(&mut self, buf: &mut [u8]) -> Result<Option<usize>> {
+		if !self.scanning {
+			return Ok(None);
+		}
+		let mut bytes_written = 0_i32;
+		let status = unsafe {
+			sys::sane_read(
+				self.handle,
+				buf.as_mut_ptr(),
+				buf.len() as i32,
+				&mut bytes_written as *mut i32,
+			)
+		};
+		match status {
+			sys::Status::Eof => {
+				if bytes_written == 0 {
+					self.scanning = false;
+					unsafe { sys::sane_cancel(self.handle) };
+
+					Ok(None)
+				} else {
+					Ok(Some(bytes_written as usize))
+				}
+			}
+			sys::Status::Good => Ok(Some(bytes_written as usize)),
+			status => Err(Error(status)),
+		}
+	}
+}
+
+#[derive(Debug)]
+pub struct DeviceOption {
+	pub name: CString,
+	pub title: CString,
+	pub desc: CString,
+	pub type_: sys::ValueType,
+	pub unit: sys::Unit,
+	pub size: u32,
+	pub cap: OptionCapability,
+	pub constraint: OptionConstraint,
+}
+
+bitflags! {
+	pub struct OptionCapability: u32 {
+		const SOFT_SELECT = sys::CAP_SOFT_SELECT;
+		const HARD_SELECT = sys::CAP_HARD_SELECT;
+		const SOFT_DETECT = sys::CAP_SOFT_DETECT;
+		const EMULATED = sys::CAP_EMULATED;
+		const AUTOMATIC = sys::CAP_AUTOMATIC;
+		const INACTIVE = sys::CAP_INACTIVE;
+		const ADVANCED = sys::CAP_ADVANCED;
+	}
+}
+
+#[derive(Debug)]
+pub enum OptionConstraint {
+	None,
+	StringList(Vec<CString>),
+	WordList(Vec<i32>),
+	Range { range: Range<i32>, quant: i32 },
+}

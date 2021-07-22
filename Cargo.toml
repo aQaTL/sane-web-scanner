@@ -14,6 +14,8 @@ actix-web = "4.0.0-beta.8"
 systemd-socket-activation = { git = "https://github.com/aQaTL/systemd-socket-activation", rev = "a80c15060a07830483f1290f7ef4b8543f97d43b" }
 futures = "0.3.15"
 tokio = { version = "1.8.2", features = ["sync", "rt"] }
+bitflags = "1.2.1"
 
 [build-dependencies]
-bindgen = "0.58.1"
+bindgen = "0.59.0"
+convert_case = "0.4.0"

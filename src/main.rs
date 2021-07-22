@@ -13,9 +13,10 @@ use systemd_socket_activation::systemd_socket_activation;
 use tokio::macros::support::{Pin, Poll};
 use tokio::sync::mpsc::UnboundedReceiver;
 
-mod sane {
-	//! API docs: <https://sane-project.gitlab.io/standard/1.06/api.html>
+#[path = "sane/mod.rs"]
+mod sane_linked;
 
+mod sane {
 	#![allow(non_upper_case_globals)]
 	#![allow(non_camel_case_types)]
 	#![allow(non_snake_case)]
@@ -64,7 +65,44 @@ fn main() -> anyhow::Result<()> {
 	flexi_logger::Logger::try_with_env_or_str(log_str())?.start()?;
 
 	if std::env::args().skip(1).any(|arg| arg == "--just-scan") {
-		return scan_to_file();
+		loop {
+			{
+				let sane = sane_linked::Sane::init_1_0()?;
+				let devices = sane.get_devices()?;
+				info!("devices: {:#?}", devices);
+
+				let mut handle = devices[0].open()?;
+
+				let device_options = handle.get_options()?;
+				info!("Device options: {:#?}", device_options);
+
+				let (width, height) = handle.start_scan()?;
+
+				let mut image = Vec::with_capacity(width as usize * height as usize * 3);
+
+				let mut buf = Vec::with_capacity(1024 * 1024 * 3);
+				debug!("cap {}", buf.capacity());
+				unsafe {
+					buf.set_len(buf.capacity());
+				}
+				while let Ok(Some(written)) = handle.read(buf.as_mut_slice()) {
+					debug!("read {}", written);
+					image.extend_from_slice(&buf[0..written]);
+				}
+
+				rgb_to_bgr(&mut image);
+				save_as_bmp("justscan.bmp".as_ref(), &image, (width, height))?;
+			}
+
+			let mut buf = String::new();
+			std::io::stdin().read_line(&mut buf)?;
+			if buf.trim() == "y" {
+				break;
+			}
+		}
+
+		return Ok(());
+		// return scan_to_file();
 	}
 
 	run_webserver()
