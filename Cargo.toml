@@ -16,4 +16,4 @@ futures = "0.3.15"
 tokio = { version = "1.8.2", features = ["sync", "rt"] }
 bitflags = "1.2.1"
 
-sane-scan = { path = "../sane-scan" }
+sane-scan = { git = "https://github.com/aQaTL/sane-scan", branch = "main" }

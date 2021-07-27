@@ -1204,6 +1204,7 @@ checksum = "71d301d4193d031abdd79ff7e3dd721168a9572ef3fe51a1517aba235bd8f86e"
 [[package]]
 name = "sane-scan"
 version = "0.1.0"
+source = "git+https://github.com/aQaTL/sane-scan?branch=main#10e43c58d4f77f7a6f30ecbcbff157472e8bb31b"
 dependencies = [
  "bindgen",
  "bitflags",
