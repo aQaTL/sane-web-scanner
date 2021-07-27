@@ -4,5 +4,4 @@
 #![allow(dead_code)]
 #![allow(clippy::unused_unit)]
 
-// include!(concat!(env!("OUT_DIR"), "/sane.rs"));
-include!(concat!(env!("OUT_DIR"), "/sane_shared.rs"));
+include!(concat!(env!("OUT_DIR"), "/sane.rs"));
