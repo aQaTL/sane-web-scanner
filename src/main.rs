@@ -217,6 +217,9 @@ fn scan() -> anyhow::Result<ScanImage> {
 				info!("Setting resolution to 300 DPI");
 				let info = handle.set_option(res_opt, sane_linked::DeviceOptionValue::Int(300))?;
 				info!("Returned info: {:#?}.", info);
+
+				let new_res = handle.get_option(res_opt)?;
+				info!("Resolution set to {:?} {:?}", new_res, res_opt.unit);
 			}
 		}
 	}
@@ -225,6 +228,8 @@ fn scan() -> anyhow::Result<ScanImage> {
 
 	let width = parameters.pixels_per_line as u32;
 	let height = parameters.lines as u32;
+
+	println!("Width: {} Height: {}", width, height);
 
 	let image = handle.read_to_vec()?;
 

@@ -370,7 +370,7 @@ impl DeviceHandle {
 			sys::sane_control_option(
 				self.handle,
 				opt.option_idx,
-				sys::Action::GetValue,
+				sys::Action::SetValue,
 				value_ptr,
 				opt_info_ptr,
 			)
@@ -443,6 +443,7 @@ pub enum OptionConstraint {
 	Range { range: Range<i32>, quant: i32 },
 }
 
+#[derive(Debug)]
 pub enum DeviceOptionValue {
 	Bool(bool),
 	Int(i32),
