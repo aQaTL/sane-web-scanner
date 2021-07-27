@@ -356,3 +356,34 @@ fn display_parameters(sane_parameters: &sane::Parameters) {
 	info!("\tLines {}.", sane_parameters.lines);
 	info!("\tDepth {}.", sane_parameters.depth);
 }
+
+fn display_options(options: &[sane::DeviceOption]) {
+	for option in options {
+		info!("{:?}", option.title.to_string_lossy());
+		info!("\t{:?}", option.name.to_string_lossy());
+		info!("\t{:?}", option.desc.to_string_lossy());
+
+		info!(
+			"Type {:?}. Unit {:?}. Size {:?}. Cap {:?}. Constraint type {:?}",
+			option.type_, option.unit, option.size, option.cap, option.constraint
+		);
+		match &option.constraint {
+			sane::OptionConstraint::None => (),
+			sane::OptionConstraint::Range { range, quant } => {
+				info!(
+					"\tRange: {}-{}. Quant {}. Steps {}.",
+					range.start,
+					range.end,
+					quant,
+					range.end / quant,
+				);
+			}
+			sane::OptionConstraint::WordList(list) => {
+				info!("\tPossible values: {:?}", list);
+			}
+			sane::OptionConstraint::StringList(list) => {
+				info!("\tPossible values: {:?}", list);
+			}
+		}
+	}
+}
