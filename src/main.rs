@@ -65,46 +65,6 @@ fn main() -> anyhow::Result<()> {
 	flexi_logger::Logger::try_with_env_or_str(log_str())?.start()?;
 
 	if std::env::args().skip(1).any(|arg| arg == "--just-scan") {
-		// loop {
-		// 	{
-		// 		let sane = sane_linked::Sane::init_1_0()?;
-		// 		let devices = sane.get_devices()?;
-		// 		info!("devices: {:#?}", devices);
-		//
-		// 		let mut handle = devices[0].open()?;
-		//
-		// 		let device_options = handle.get_options()?;
-		// 		info!("Device options: {:#?}", device_options);
-		//
-		// 		let parameters = handle.start_scan()?;
-		//
-		// 		let width = parameters.pixels_per_line as u32;
-		// 		let height = parameters.lines as u32;
-		//
-		// 		let mut image = Vec::with_capacity(width as usize * height as usize * 3);
-		//
-		// 		let mut buf = Vec::with_capacity(1024 * 1024 * 3);
-		// 		debug!("cap {}", buf.capacity());
-		// 		unsafe {
-		// 			buf.set_len(buf.capacity());
-		// 		}
-		// 		while let Ok(Some(written)) = handle.read(buf.as_mut_slice()) {
-		// 			debug!("read {}", written);
-		// 			image.extend_from_slice(&buf[0..written]);
-		// 		}
-		//
-		// 		rgb_to_bgr(&mut image);
-		// 		save_as_bmp("justscan.bmp".as_ref(), &image, (width, height))?;
-		// 	}
-		//
-		// 	let mut buf = String::new();
-		// 	std::io::stdin().read_line(&mut buf)?;
-		// 	if buf.trim() == "y" {
-		// 		break;
-		// 	}
-		// }
-
-		// return Ok(());
 		return scan_to_file();
 	}
 
