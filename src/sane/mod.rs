@@ -242,18 +242,23 @@ impl DeviceHandle {
 			return Err(Error(status));
 		}
 
-		let mut sane_parameters = sys::Parameters::default();
+		let parameters = self.get_parameters()?;
+
+		self.scanning = true;
+
+		Ok(parameters)
+	}
+
+	pub fn get_parameters(&self) -> Result<sys::Parameters> {
+		let mut parameters = sys::Parameters::default();
 
 		let status = unsafe {
-			sys::sane_get_parameters(self.handle, &mut sane_parameters as *mut sys::Parameters)
+			sys::sane_get_parameters(self.handle, &mut parameters as *mut sys::Parameters)
 		};
 		if status != sys::Status::Good {
 			return Err(Error(status));
 		}
-
-		self.scanning = true;
-
-		Ok(sane_parameters)
+		Ok(parameters)
 	}
 
 	pub fn read(&mut self, buf: &mut [u8]) -> Result<Option<usize>> {
@@ -283,6 +288,25 @@ impl DeviceHandle {
 			sys::Status::Good => Ok(Some(bytes_written as usize)),
 			status => Err(Error(status)),
 		}
+	}
+
+	pub fn read_to_vec(&mut self) -> Result<Vec<u8>> {
+		let parameters = self.get_parameters()?;
+
+		let mut image = Vec::<u8>::with_capacity(
+			parameters.bytes_per_line as usize * parameters.lines as usize,
+		);
+
+		let mut buf = Vec::<u8>::with_capacity(1024 * 1024);
+		unsafe {
+			buf.set_len(buf.capacity());
+		}
+
+		while let Ok(Some(written)) = self.read(buf.as_mut_slice()) {
+			image.extend_from_slice(&buf[0..written]);
+		}
+
+		Ok(image)
 	}
 
 	pub fn get_option(&self, opt: &DeviceOption) -> Result<DeviceOptionValue> {

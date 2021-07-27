@@ -65,47 +65,47 @@ fn main() -> anyhow::Result<()> {
 	flexi_logger::Logger::try_with_env_or_str(log_str())?.start()?;
 
 	if std::env::args().skip(1).any(|arg| arg == "--just-scan") {
-		loop {
-			{
-				let sane = sane_linked::Sane::init_1_0()?;
-				let devices = sane.get_devices()?;
-				info!("devices: {:#?}", devices);
+		// loop {
+		// 	{
+		// 		let sane = sane_linked::Sane::init_1_0()?;
+		// 		let devices = sane.get_devices()?;
+		// 		info!("devices: {:#?}", devices);
+		//
+		// 		let mut handle = devices[0].open()?;
+		//
+		// 		let device_options = handle.get_options()?;
+		// 		info!("Device options: {:#?}", device_options);
+		//
+		// 		let parameters = handle.start_scan()?;
+		//
+		// 		let width = parameters.pixels_per_line as u32;
+		// 		let height = parameters.lines as u32;
+		//
+		// 		let mut image = Vec::with_capacity(width as usize * height as usize * 3);
+		//
+		// 		let mut buf = Vec::with_capacity(1024 * 1024 * 3);
+		// 		debug!("cap {}", buf.capacity());
+		// 		unsafe {
+		// 			buf.set_len(buf.capacity());
+		// 		}
+		// 		while let Ok(Some(written)) = handle.read(buf.as_mut_slice()) {
+		// 			debug!("read {}", written);
+		// 			image.extend_from_slice(&buf[0..written]);
+		// 		}
+		//
+		// 		rgb_to_bgr(&mut image);
+		// 		save_as_bmp("justscan.bmp".as_ref(), &image, (width, height))?;
+		// 	}
+		//
+		// 	let mut buf = String::new();
+		// 	std::io::stdin().read_line(&mut buf)?;
+		// 	if buf.trim() == "y" {
+		// 		break;
+		// 	}
+		// }
 
-				let mut handle = devices[0].open()?;
-
-				let device_options = handle.get_options()?;
-				info!("Device options: {:#?}", device_options);
-
-				let parameters = handle.start_scan()?;
-
-				let width = parameters.pixels_per_line as u32;
-				let height = parameters.lines as u32;
-
-				let mut image = Vec::with_capacity(width as usize * height as usize * 3);
-
-				let mut buf = Vec::with_capacity(1024 * 1024 * 3);
-				debug!("cap {}", buf.capacity());
-				unsafe {
-					buf.set_len(buf.capacity());
-				}
-				while let Ok(Some(written)) = handle.read(buf.as_mut_slice()) {
-					debug!("read {}", written);
-					image.extend_from_slice(&buf[0..written]);
-				}
-
-				rgb_to_bgr(&mut image);
-				save_as_bmp("justscan.bmp".as_ref(), &image, (width, height))?;
-			}
-
-			let mut buf = String::new();
-			std::io::stdin().read_line(&mut buf)?;
-			if buf.trim() == "y" {
-				break;
-			}
-		}
-
-		return Ok(());
-		// return scan_to_file();
+		// return Ok(());
+		return scan_to_file();
 	}
 
 	run_webserver()
@@ -231,48 +231,42 @@ struct ScanImage {
 }
 
 fn scan() -> anyhow::Result<ScanImage> {
-	let libsane = init_libsane()?;
-	let (device_handle, width, height) = try_start_scanning(&libsane)?;
+	let sane = sane_linked::Sane::init_1_0()?;
+	let devices = sane.get_devices()?;
+	info!("devices: {:#?}", devices);
 
-	// 10 MB buf for the image
-	let mut image = Vec::<u8>::with_capacity(100 * 1024 * 1024);
-
-	let mut buf = Vec::<u8>::with_capacity(1024 * 1024);
-	let mut bytes_written = 0_i32;
-	loop {
-		unsafe {
-			buf.set_len(0);
-		}
-		let status = unsafe {
-			libsane.sane_read(
-				device_handle.0,
-				buf.as_mut_ptr(),
-				buf.capacity() as i32,
-				&mut bytes_written as *mut i32,
-			)
-		};
-		match status {
-			sane::SANE_Status_SANE_STATUS_EOF => {
-				debug!("EOF ({} bytes read).", bytes_written);
-				break;
-			}
-			sane::SANE_Status_SANE_STATUS_GOOD => {
-				debug!("Good ({} bytes read).", bytes_written);
-			}
-			status => {
-				bail!("Failed to read data {}.", status);
-			}
-		}
-
-		unsafe {
-			buf.set_len(bytes_written as usize);
-		}
-		image.extend_from_slice(&buf);
+	if devices.is_empty() {
+		bail!("No scanners found");
 	}
 
-	unsafe {
-		libsane.sane_cancel(device_handle.0);
+	let mut handle = devices[0].open()?;
+
+	let device_options = handle.get_options()?;
+	info!("Device options: {:#?}", device_options);
+
+	if let Some(res_opt) = device_options
+		.iter()
+		.find(|opt| opt.name.to_bytes() == b"resolution")
+	{
+		if let sane_linked::OptionConstraint::WordList(ref resolutions) = res_opt.constraint {
+			info!(
+				"Available resolutions: {:?}. Unit: {:?}",
+				resolutions, res_opt.unit
+			);
+			if matches!(res_opt.unit, sane_linked::sys::Unit::Dpi) && resolutions.contains(&300) {
+				info!("Setting resolution to 300 DPI");
+				let info = handle.set_option(res_opt, sane_linked::DeviceOptionValue::Int(300))?;
+				info!("Returned info: {:#?}.", info);
+			}
+		}
 	}
+
+	let parameters = handle.start_scan()?;
+
+	let width = parameters.pixels_per_line as u32;
+	let height = parameters.lines as u32;
+
+	let image = handle.read_to_vec()?;
 
 	Ok(ScanImage {
 		raw_data: image,
