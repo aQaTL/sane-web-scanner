@@ -2,6 +2,8 @@
 
 pub mod sys;
 
+pub use sys::*;
+
 use bitflags::bitflags;
 use log::{debug, info};
 use std::ffi::{c_void, CStr, CString};
