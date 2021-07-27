@@ -35,6 +35,18 @@ mod sane {
 	}
 }
 
+macro_rules! try_or_send {
+	($v:expr, $sender:ident) => {
+		match $v {
+			Ok(v) => v,
+			Err(e) => {
+				$sender.send(Err(e.into())).unwrap();
+				return;
+			}
+		}
+	};
+}
+
 struct Device<'a>(pub sane::SANE_Handle, &'a sane::libsane);
 
 unsafe impl Send for Device<'_> {}
@@ -553,21 +565,48 @@ async fn scan_stream_bmp() -> StreamingReceiver<Result<Bytes, anyhow::Error>> {
 	let (sender, receiver) = tokio::sync::mpsc::unbounded_channel::<Result<Bytes, anyhow::Error>>();
 
 	tokio::task::spawn_blocking(move || {
-		let libsane = match init_libsane() {
-			Ok(v) => v,
-			Err(e) => {
-				sender.send(Err(e)).unwrap();
-				return;
+		let libsane: sane_linked::Sane = try_or_send!(sane_linked::Sane::init_1_0(), sender);
+		let devices: Vec<sane_linked::Device> = try_or_send!(libsane.get_devices(), sender);
+
+		if devices.is_empty() {
+			sender.send(Err(anyhow!("No scanners found."))).unwrap();
+			return;
+		}
+
+		let mut handle = try_or_send!(devices[0].open(), sender);
+
+		let device_options = try_or_send!(handle.get_options(), sender);
+		info!("Device options: {:#?}", device_options);
+
+		if let Some(res_opt) = device_options
+			.iter()
+			.find(|opt| opt.name.to_bytes() == b"resolution")
+		{
+			if let sane_linked::OptionConstraint::WordList(ref resolutions) = res_opt.constraint {
+				info!(
+					"Available resolutions: {:?}. Unit: {:?}",
+					resolutions, res_opt.unit
+				);
+				if matches!(res_opt.unit, sane_linked::sys::Unit::Dpi) && resolutions.contains(&300)
+				{
+					info!("Setting resolution to 300 DPI");
+					let info = try_or_send!(
+						handle.set_option(res_opt, sane_linked::DeviceOptionValue::Int(300)),
+						sender
+					);
+					info!("Returned info: {:#?}.", info);
+
+					let new_res = try_or_send!(handle.get_option(res_opt), sender);
+					info!("Resolution set to {:?} {:?}", new_res, res_opt.unit);
+				}
 			}
-		};
-		let (device_handle, width, height) = match try_start_scanning(&libsane) {
-			Ok(v) => v,
-			Err(e) => {
-				error!("sending {:?}", e);
-				sender.send(Err(e)).unwrap();
-				return;
-			}
-		};
+		}
+
+		let parameters = try_or_send!(handle.start_scan(), sender);
+
+		let width = parameters.pixels_per_line as u32;
+		let height = parameters.lines as u32;
+
 		let mut bmp_header = Vec::with_capacity(BMP_HEADER_SIZE as usize);
 		let encode_as_bmp = |img_len: u32, (width, height): (u32, u32), out: &mut Vec<_>| {
 			out.write_all(&[b'B', b'M'])?;
@@ -592,55 +631,24 @@ async fn scan_stream_bmp() -> StreamingReceiver<Result<Bytes, anyhow::Error>> {
 
 			Result::<(), std::io::Error>::Ok(())
 		};
-		if let Err(e) = encode_as_bmp(width * height * 3, (width, height), &mut bmp_header) {
-			sender.send(Err(anyhow::Error::from(e))).unwrap();
-			return;
-		}
+		try_or_send!(
+			encode_as_bmp(width * height * 3, (width, height), &mut bmp_header),
+			sender
+		);
 		sender.send(Ok(Bytes::from(bmp_header))).unwrap();
 
 		// Vector capacity must be divisible by 3, so that we always get full pixels. Otherwise, we'd
 		// get color artifacts when switching from RGB to BGR
 		let mut buf = Vec::<u8>::with_capacity(3 * 1024 * 1024);
-		let mut bytes_written = 0_i32;
-
-		loop {
-			unsafe {
-				buf.set_len(0);
-			}
-			let status = unsafe {
-				libsane.sane_read(
-					device_handle.0,
-					buf.as_mut_ptr(),
-					buf.capacity() as i32,
-					&mut bytes_written as *mut i32,
-				)
-			};
-			match status {
-				sane::SANE_Status_SANE_STATUS_EOF => {
-					debug!("EOF ({} bytes read).", bytes_written);
-					break;
-				}
-				sane::SANE_Status_SANE_STATUS_GOOD => {
-					debug!("Good ({} bytes read).", bytes_written);
-				}
-				status => {
-					sender
-						.send(Err(anyhow!("Failed to read data {}.", status)))
-						.unwrap();
-					break;
-				}
-			}
-
-			unsafe {
-				buf.set_len(bytes_written as usize);
-			}
-			let mut cloned_buf = buf.clone();
-			rgb_to_bgr(&mut cloned_buf);
-			sender.send(Ok(Bytes::from(cloned_buf))).unwrap();
-		}
 
 		unsafe {
-			libsane.sane_cancel(device_handle.0);
+			buf.set_len(buf.capacity());
+		}
+
+		while let Ok(Some(written)) = handle.read(buf.as_mut_slice()) {
+			let mut cloned_buf = (&buf[0..written]).to_vec();
+			rgb_to_bgr(&mut cloned_buf);
+			sender.send(Ok(Bytes::from(cloned_buf))).unwrap();
 		}
 	});
 	StreamingReceiver(receiver)
