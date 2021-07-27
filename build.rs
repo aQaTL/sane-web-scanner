@@ -76,11 +76,11 @@ impl bindgen::callbacks::ParseCallbacks for CamelCaseConverterCallback {
 		let original_item_name = original_item_name
 			.strip_prefix("SANE_")
 			.unwrap_or(original_item_name);
-		if original_item_name.contains("_")
+		if original_item_name.contains('_')
 			&& original_item_name.to_case(Case::Snake) != original_item_name
 			&& original_item_name.to_case(Case::UpperSnake) != original_item_name
 		{
-			return Some(original_item_name.replace("_", ""));
+			return Some(original_item_name.replace('_', ""));
 		}
 		Some(original_item_name.to_string())
 	}

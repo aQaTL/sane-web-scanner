@@ -96,7 +96,7 @@ async fn run_webserver() -> anyhow::Result<()> {
 		.skip(1)
 		.find(|arg| arg.starts_with("-p="))
 		.and_then(|port| port.strip_prefix("-p=").map(ToString::to_string))
-		.unwrap_or("8000".to_string())
+		.unwrap_or_else(|| "8000".to_string())
 		.parse::<u16>()?;
 
 	let (address, port) = ("0.0.0.0", port);
