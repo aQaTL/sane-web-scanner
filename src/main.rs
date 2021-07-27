@@ -137,21 +137,6 @@ async fn scan_service() -> Result<HttpResponse, ScanServiceError> {
 	// TODO(aqatl): Possibly via a websocket?
 	let scan_stream = scan_stream_bmp().await;
 
-	// info!("Scan completed. Saving to file.");
-
-	// // BMP is BGR by default, while our image is assumed to be RGB. This swaps red channel with blue.
-	// rgb_to_bgr(&mut image.raw_data);
-
-	// save_as_bmp(
-	// 	"./scanned_document.bmp".as_ref(),
-	// 	&image.raw_data,
-	// 	(image.width, image.height),
-	// )
-	// .unwrap();
-
-	// let mut bmp_img = Vec::with_capacity(image.raw_data.len() + BMP_HEADER_SIZE as usize);
-	// encode_as_bmp(&image.raw_data, (image.width, image.height), &mut bmp_img).unwrap();
-
 	Ok(HttpResponse::Ok()
 		.content_type("image/bmp")
 		.streaming(scan_stream))
@@ -239,8 +224,7 @@ async fn scan_stream_bmp() -> StreamingReceiver<Result<Bytes, anyhow::Error>> {
 					"Available resolutions: {:?}. Unit: {:?}",
 					resolutions, res_opt.unit
 				);
-				if matches!(res_opt.unit, sane::sys::Unit::Dpi) && resolutions.contains(&300)
-				{
+				if matches!(res_opt.unit, sane::sys::Unit::Dpi) && resolutions.contains(&300) {
 					info!("Setting resolution to 300 DPI");
 					let info = try_or_send!(
 						handle.set_option(res_opt, sane::DeviceOptionValue::Int(300)),
