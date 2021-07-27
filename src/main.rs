@@ -12,7 +12,7 @@ use systemd_socket_activation::systemd_socket_activation;
 use tokio::macros::support::{Pin, Poll};
 use tokio::sync::mpsc::UnboundedReceiver;
 
-mod sane;
+use sane_scan as sane;
 
 macro_rules! try_or_send {
 	($v:expr, $sender:ident) => {
@@ -345,4 +345,14 @@ fn rgb_to_bgr(image: &mut [u8]) {
 	for chunk in image.chunks_exact_mut(3) {
 		chunk.swap(0, 2);
 	}
+}
+
+fn display_parameters(sane_parameters: &sane::Parameters) {
+	info!("Print parameters:");
+	info!("\tFormat {:?}.", sane_parameters.format);
+	info!("\tLast Frame {}.", sane_parameters.last_frame);
+	info!("\tBytes per line {}.", sane_parameters.bytes_per_line);
+	info!("\tPixels per line {}.", sane_parameters.pixels_per_line);
+	info!("\tLines {}.", sane_parameters.lines);
+	info!("\tDepth {}.", sane_parameters.depth);
 }

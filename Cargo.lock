@@ -1202,18 +1202,27 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "71d301d4193d031abdd79ff7e3dd721168a9572ef3fe51a1517aba235bd8f86e"
 
 [[package]]
+name = "sane-scan"
+version = "0.1.0"
+dependencies = [
+ "bindgen",
+ "bitflags",
+ "convert_case",
+ "log",
+]
+
+[[package]]
 name = "sane-web-scanner"
 version = "0.1.0"
 dependencies = [
  "actix-web",
  "anyhow",
- "bindgen",
  "bitflags",
- "convert_case",
  "flexi_logger",
  "futures",
  "libloading",
  "log",
+ "sane-scan",
  "systemd-socket-activation",
  "tokio",
 ]
