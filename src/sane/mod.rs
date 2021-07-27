@@ -5,13 +5,20 @@ pub mod sys;
 use bitflags::bitflags;
 use log::{debug, info};
 use std::ffi::{c_void, CStr, CString};
-use std::fmt::{Display, Formatter};
+use std::fmt::{Debug, Display, Formatter};
 use std::ops::Range;
 
 type Result<T> = std::result::Result<T, Error>;
 
-#[derive(Debug)]
-pub struct Error(sys::Status);
+pub struct Error(pub sys::Status);
+
+impl Debug for Error {
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+		let status_description =
+			unsafe { CStr::from_ptr(sys::sane_strstatus(self.0)).to_string_lossy() };
+		f.debug_tuple("Error").field(&status_description).finish()
+	}
+}
 
 impl Display for Error {
 	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -150,9 +157,9 @@ impl DeviceHandle {
 
 		let mut options = Vec::with_capacity(option_count_value as usize);
 
-		for option_num in 1..option_count_value {
+		for option_idx in 1..option_count_value {
 			let option_descriptor =
-				unsafe { sys::sane_get_option_descriptor(self.handle, option_num) };
+				unsafe { sys::sane_get_option_descriptor(self.handle, option_idx) };
 			if option_descriptor.is_null() {
 				return Err(Error(status));
 			}
@@ -213,6 +220,7 @@ impl DeviceHandle {
 				};
 
 				options.push(DeviceOption {
+					option_idx,
 					name,
 					title,
 					desc,
@@ -286,10 +294,101 @@ impl DeviceHandle {
 			status => Err(Error(status)),
 		}
 	}
+
+	pub fn get_option(&self, opt: &DeviceOption) -> Result<DeviceOptionValue> {
+		let mut value = vec![0_u8; opt.size as usize];
+		let value_ptr = value.as_mut_ptr() as *mut c_void;
+
+		let status = unsafe {
+			sys::sane_control_option(
+				self.handle,
+				opt.option_idx,
+				sys::Action::GetValue,
+				value_ptr,
+				std::ptr::null_mut(),
+			)
+		};
+		if status != sys::Status::Good {
+			return Err(Error(status));
+		}
+
+		let opt_value = match opt.type_ {
+			sys::ValueType::Bool => unsafe { DeviceOptionValue::Bool(*(value_ptr as *const bool)) },
+			sys::ValueType::Int => unsafe { DeviceOptionValue::Int(*(value_ptr as *const i32)) },
+			sys::ValueType::Fixed => unsafe {
+				DeviceOptionValue::Fixed(*(value_ptr as *const i32))
+			},
+			sys::ValueType::String => unsafe {
+				DeviceOptionValue::String(CStr::from_ptr(value_ptr as *const i8).to_owned())
+			},
+			v @ sys::ValueType::Button | v @ sys::ValueType::Group => {
+				panic!("Invalid state. {:?} doesn't represent a value.", v);
+			}
+		};
+
+		Ok(opt_value)
+	}
+
+	pub fn set_option(
+		&self,
+		opt: &DeviceOption,
+		mut value: DeviceOptionValue,
+	) -> Result<OptionInfo> {
+		let mut str_vec;
+		let value_ptr = match value {
+			DeviceOptionValue::Bool(ref mut v) => v as *mut bool as *mut i32 as *mut c_void,
+			DeviceOptionValue::Int(ref mut v) => v as *mut i32 as *mut c_void,
+			DeviceOptionValue::Fixed(ref mut v) => v as *mut i32 as *mut c_void,
+			DeviceOptionValue::String(str) => {
+				str_vec = str.into_bytes_with_nul();
+				str_vec.as_mut_ptr() as *mut c_void
+			}
+			DeviceOptionValue::Button => std::ptr::null_mut::<c_void>(),
+			DeviceOptionValue::Group => {
+				panic!("Group option doesn't have a settable value.");
+			}
+		};
+
+		let mut opt_info = OptionInfo::empty();
+		let opt_info_ptr = &mut opt_info as *mut OptionInfo as *mut i32;
+
+		let status = unsafe {
+			sys::sane_control_option(
+				self.handle,
+				opt.option_idx,
+				sys::Action::GetValue,
+				value_ptr,
+				opt_info_ptr,
+			)
+		};
+		if status != sys::Status::Good {
+			return Err(Error(status));
+		}
+		Ok(opt_info)
+	}
+
+	pub fn set_option_auto(&self, opt: &DeviceOption) -> Result<OptionInfo> {
+		let mut opt_info = OptionInfo::empty();
+		let opt_info_ptr = &mut opt_info as *mut OptionInfo as *mut i32;
+		let status = unsafe {
+			sys::sane_control_option(
+				self.handle,
+				opt.option_idx,
+				sys::Action::SetAuto,
+				std::ptr::null_mut(),
+				opt_info_ptr,
+			)
+		};
+		if status != sys::Status::Good {
+			return Err(Error(status));
+		}
+		Ok(opt_info)
+	}
 }
 
 #[derive(Debug)]
 pub struct DeviceOption {
+	pub option_idx: i32,
 	pub name: CString,
 	pub title: CString,
 	pub desc: CString,
@@ -301,6 +400,7 @@ pub struct DeviceOption {
 }
 
 bitflags! {
+	#[repr(transparent)]
 	pub struct OptionCapability: u32 {
 		const SOFT_SELECT = sys::CAP_SOFT_SELECT;
 		const HARD_SELECT = sys::CAP_HARD_SELECT;
@@ -312,10 +412,28 @@ bitflags! {
 	}
 }
 
+bitflags! {
+	#[repr(transparent)]
+	pub struct OptionInfo: u32 {
+		const INFO_INEXACT = sys::INFO_INEXACT;
+		const INFO_RELOAD_OPTIONS = sys::INFO_RELOAD_OPTIONS;
+		const INFO_RELOAD_PARAMS = sys::INFO_RELOAD_PARAMS;
+	}
+}
+
 #[derive(Debug)]
 pub enum OptionConstraint {
 	None,
 	StringList(Vec<CString>),
 	WordList(Vec<i32>),
 	Range { range: Range<i32>, quant: i32 },
+}
+
+pub enum DeviceOptionValue {
+	Bool(bool),
+	Int(i32),
+	Fixed(i32),
+	String(CString),
+	Button,
+	Group,
 }

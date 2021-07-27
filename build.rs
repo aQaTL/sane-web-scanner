@@ -56,7 +56,10 @@ impl bindgen::callbacks::ParseCallbacks for CamelCaseConverterCallback {
 		original_variant_name: &str,
 		_variant_value: EnumVariantValue,
 	) -> Option<String> {
-		if let Some(enum_name) = enum_name {
+		if let Some(mut enum_name) = enum_name {
+			if enum_name == "SANE_Value_Type" {
+				enum_name = "SANE_TYPE";
+			}
 			let enum_name = enum_name.strip_suffix("_Type").unwrap_or(&enum_name);
 			let enum_name_uppercase = enum_name.to_ascii_uppercase();
 			let prefix = format!("{}_", enum_name_uppercase);
