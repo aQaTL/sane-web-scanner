@@ -236,7 +236,7 @@ impl DeviceHandle {
 		Ok(options)
 	}
 
-	pub fn start_scan(&mut self) -> Result<(u32, u32)> {
+	pub fn start_scan(&mut self) -> Result<sys::Parameters> {
 		let status = unsafe { sys::sane_start(self.handle) };
 		if status != sys::Status::Good {
 			return Err(Error(status));
@@ -253,17 +253,7 @@ impl DeviceHandle {
 
 		self.scanning = true;
 
-		info!("Print parameters:");
-		info!("\tFormat {:?}.", sane_parameters.format);
-		info!("\tLast Frame {}.", sane_parameters.last_frame);
-		info!("\tBytes per line {}.", sane_parameters.bytes_per_line);
-		info!("\tPixels per line {}.", sane_parameters.pixels_per_line);
-		info!("\tLines {}.", sane_parameters.lines);
-		info!("\tDepth {}.", sane_parameters.depth);
-
-		let width = sane_parameters.pixels_per_line as u32;
-		let height = sane_parameters.lines as u32;
-		Ok((width, height))
+		Ok(sane_parameters)
 	}
 
 	pub fn read(&mut self, buf: &mut [u8]) -> Result<Option<usize>> {
@@ -436,4 +426,14 @@ pub enum DeviceOptionValue {
 	String(CString),
 	Button,
 	Group,
+}
+
+pub fn display_parameters(sane_parameters: &sys::Parameters) {
+	info!("Print parameters:");
+	info!("\tFormat {:?}.", sane_parameters.format);
+	info!("\tLast Frame {}.", sane_parameters.last_frame);
+	info!("\tBytes per line {}.", sane_parameters.bytes_per_line);
+	info!("\tPixels per line {}.", sane_parameters.pixels_per_line);
+	info!("\tLines {}.", sane_parameters.lines);
+	info!("\tDepth {}.", sane_parameters.depth);
 }

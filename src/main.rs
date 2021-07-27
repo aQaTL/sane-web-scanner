@@ -76,7 +76,10 @@ fn main() -> anyhow::Result<()> {
 				let device_options = handle.get_options()?;
 				info!("Device options: {:#?}", device_options);
 
-				let (width, height) = handle.start_scan()?;
+				let parameters = handle.start_scan()?;
+
+				let width = parameters.pixels_per_line as u32;
+				let height = parameters.lines as u32;
 
 				let mut image = Vec::with_capacity(width as usize * height as usize * 3);
 
