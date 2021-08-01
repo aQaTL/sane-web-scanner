@@ -14,6 +14,8 @@ use tokio::sync::mpsc::UnboundedReceiver;
 
 use sane_scan as sane;
 
+mod frontend_files;
+
 macro_rules! try_or_send {
 	($v:expr, $sender:ident) => {
 		match $v {
@@ -62,6 +64,11 @@ fn scan_to_file() -> anyhow::Result<()> {
 
 #[actix_web::main]
 async fn run_webserver() -> anyhow::Result<()> {
+	debug!("Frontend files:");
+	for (filename, _content) in frontend_files::FRONTEND_FILES.iter() {
+		debug!("\t{}", filename);
+	}
+
 	let mut http_server =
 		HttpServer::new(|| App::new().service(scan_service).service(echo_service));
 
@@ -347,6 +354,7 @@ fn rgb_to_bgr(image: &mut [u8]) {
 	}
 }
 
+#[allow(dead_code)]
 fn display_parameters(sane_parameters: &sane::Parameters) {
 	info!("Print parameters:");
 	info!("\tFormat {:?}.", sane_parameters.format);
@@ -357,6 +365,7 @@ fn display_parameters(sane_parameters: &sane::Parameters) {
 	info!("\tDepth {}.", sane_parameters.depth);
 }
 
+#[allow(dead_code)]
 fn display_options(options: &[sane::DeviceOption]) {
 	for option in options {
 		info!("{:?}", option.title.to_string_lossy());

@@ -1221,6 +1221,7 @@ dependencies = [
  "bitflags",
  "flexi_logger",
  "futures",
+ "lazy_static",
  "libloading",
  "log",
  "sane-scan",

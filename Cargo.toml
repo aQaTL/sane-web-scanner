@@ -15,5 +15,6 @@ systemd-socket-activation = { git = "https://github.com/aQaTL/systemd-socket-act
 futures = "0.3.15"
 tokio = { version = "1.8.2", features = ["sync", "rt"] }
 bitflags = "1.2.1"
+lazy_static = "1.4.0"
 
 sane-scan = { git = "https://github.com/aQaTL/sane-scan", branch = "main" }
