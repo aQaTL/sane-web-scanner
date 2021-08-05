@@ -4,4 +4,4 @@ default:
 	cargo check
 
 run export:
-	$(MAKE) -C frontend $1
+	$(MAKE) -C frontend $@
