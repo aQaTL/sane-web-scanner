@@ -69,8 +69,12 @@ async fn run_webserver() -> anyhow::Result<()> {
 		debug!("\t{}", filename);
 	}
 
-	let mut http_server =
-		HttpServer::new(|| App::new().service(scan_service).service(echo_service));
+	let mut http_server = HttpServer::new(|| {
+		App::new()
+			.service(scan_service)
+			.service(echo_service)
+			.service(frontend_files::Service)
+	});
 
 	let port = std::env::args()
 		.skip(1)

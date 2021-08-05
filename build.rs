@@ -5,14 +5,18 @@ use std::process::Command;
 
 fn main() -> Result<(), std::io::Error> {
 	println!("cargo:rerun-if-changed=frontend/pages");
-	println!("cargo:rerun-if-changed=frontend/public");
+	println!("cargo:rerun-if-changed=frontend/static");
+	println!("cargo:rerun-if-changed=frontend/components");
 
 	let out_dir = PathBuf::from(std::env::var("OUT_DIR").unwrap());
-	let frontend_out_dir = out_dir.join("frontend");
+
+	let frontend_dist_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+		.join("target")
+		.join("frontend");
 
 	let exit_status = Command::new("npx")
-		.arg("next")
-		.arg("build")
+		.arg("nuxt")
+		.arg("generate")
 		.current_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("frontend"))
 		.spawn()?
 		.wait()?;
@@ -21,27 +25,14 @@ fn main() -> Result<(), std::io::Error> {
 		std::process::exit(exit_status.code().unwrap());
 	}
 
-	let exit_status = Command::new("npx")
-		.arg("next")
-		.arg("export")
-		.arg("-o")
-		.arg(&frontend_out_dir)
-		.current_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("frontend"))
-		.spawn()?
-		.wait()?;
-
-	if !exit_status.success() {
-		std::process::exit(exit_status.code().unwrap());
-	}
-
-	let frontend_files = DirIter::new(&frontend_out_dir)?
+	let frontend_files = DirIter::new(&frontend_dist_dir)?
 		.filter_map(|e| e.ok())
 		.filter(|e| e.path().is_file())
 		.map(|e| e.path())
 		.map(|path| {
 			format!(
 				"(\"{}\", &include_bytes!(\"{}\")[..]), ",
-				path.strip_prefix(&frontend_out_dir).unwrap().display(),
+				path.strip_prefix(&frontend_dist_dir).unwrap().display(),
 				path.display(),
 			)
 		})

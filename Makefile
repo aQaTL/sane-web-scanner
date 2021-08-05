@@ -3,5 +3,7 @@ SHELL := /bin/bash
 default:
 	cargo check
 
-run export:
-	$(MAKE) -C frontend $@
+run: dev
+
+dev build start generate lint:
+	cd frontend && npm run $@

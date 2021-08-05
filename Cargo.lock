@@ -1224,6 +1224,7 @@ dependencies = [
  "lazy_static",
  "libloading",
  "log",
+ "percent-encoding",
  "sane-scan",
  "systemd-socket-activation",
  "tokio",
