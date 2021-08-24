@@ -71,8 +71,12 @@ async fn run_webserver() -> anyhow::Result<()> {
 
 	let mut http_server = HttpServer::new(|| {
 		App::new()
-			.service(scan_service)
-			.service(echo_service)
+			.service(
+				web::scope("/api/v1")
+					.service(scan_service)
+					.service(ping_service)
+					.service(echo_service),
+			)
 			.service(frontend_files::Service)
 	});
 
@@ -141,6 +145,11 @@ async fn echo_service(mut payload: web::Payload) -> Result<Bytes, actix_web::Err
 	debug!("Received {:?}. Echoing it", &body);
 
 	Ok(body.freeze())
+}
+
+#[get("/ping")]
+async fn ping_service() -> &'static str {
+	"pong"
 }
 
 #[get("/scan.bmp")]

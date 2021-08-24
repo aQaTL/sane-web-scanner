@@ -1,5 +1,6 @@
 <template>
 	<div>
+		<NuxtLink to="/">Back</NuxtLink>
 		<p>Hiiiiii!</p>
 		<p>Co tam?</p>
 	</div>
